@@ -1,0 +1,7 @@
+# Organization ID associated with OpenAI API key.
+openai_organization_id = "<replace me>"
+
+# Where the alerts will be posted.
+feed_channel_id = "<replace me>"
+
+

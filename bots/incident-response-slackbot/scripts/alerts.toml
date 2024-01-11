@@ -1,0 +1,20 @@
+# Alert Examples - These are the alerts that will be sent to the feed channel.
+[[alerts]]
+id = "pivot"
+name = "Pivoting"
+description = "User was found pivoting from one host to another"
+user_id = "<insert slack user id here>"
+
+[alerts.properties]
+source_host = "source.machine.org"
+destination_host = "destination.machine.org"
+
+[[alerts]]
+id = "privesc"
+name = "Privileged Escalation"
+description = "Privileged escalation was detected"
+user_id = "<insert slack user id here>"
+
+[alerts.properties]
+previous_role = "reader"
+new_role = "admin"

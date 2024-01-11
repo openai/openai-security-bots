@@ -9,7 +9,7 @@ shared/
   openai-slackbot/
 bots/
   triage-slackbot/
-  <other bots coming!>
+  incident-response-slackbot/
 ```
 
 Refer to each bot's README for more information and setup instruction.

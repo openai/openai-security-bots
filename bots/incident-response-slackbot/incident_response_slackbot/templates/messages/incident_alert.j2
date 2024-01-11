@@ -1,0 +1,46 @@
+[
+	{
+		"type": "section",
+		"text": {
+			"type": "mrkdwn",
+			"text": "Incident: {{ alert_name }} with user <@{{ user_id }}>"
+		}
+	},
+	{
+		"type": "context",
+		"elements": [
+			{
+				"type": "plain_text",
+				"text": "Details in :thread:",
+				"emoji": true
+			}
+		]
+	},
+	{
+		"type": "actions",
+		"elements": [
+			{
+				"type": "button",
+				"text": {
+					"type": "plain_text",
+					"emoji": true,
+					"text": "Start Chat"
+				},
+				"style": "primary",
+				"value": "{{ user_id }}",
+				"action_id": "start_chat_submit_action"
+			},
+			{
+				"type": "button",
+				"text": {
+					"type": "plain_text",
+					"emoji": true,
+					"text": "Do Nothing"
+				},
+				"style": "danger",
+				"value": "recategorize",
+				"action_id": "do_nothing_submit_action"
+			}
+		]
+	}
+]

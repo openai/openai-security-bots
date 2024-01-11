@@ -35,4 +35,5 @@ build-all:
 
 test-all: 
 	pytest shared/openai-slackbot && \
-	pytest bots/triage-slackbot
+	pytest bots/triage-slackbot && \
+	pytest bots/incident-response-slackbot

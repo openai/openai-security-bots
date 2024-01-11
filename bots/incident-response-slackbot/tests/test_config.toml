@@ -1,0 +1,6 @@
+# Organization ID associated with OpenAI API key.
+openai_organization_id = "mock_openai_organization_id"
+
+# Where the alerts will be posted.
+feed_channel_id = "mock_feed_channel_id"
+
