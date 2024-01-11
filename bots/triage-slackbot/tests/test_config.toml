@@ -1,0 +1,32 @@
+# Organization ID associated with OpenAI API key.
+openai_organization_id = "org-1234"
+
+# Prompt to use for categorizing inbound requests.
+openai_prompt = """
+You are currently an on-call engineer for a security team at a tech company. 
+Your goal is to triage the following incoming Slack message into three categories:
+1. Privacy, return "privacy"
+2. Application security, return "appsec"
+3. Physical security, return "physical_security"
+"""
+inbound_request_channel_id = "C12345"
+feed_channel_id = "C23456"
+other_category_enabled = true
+
+[[ categories ]] 
+key = "appsec"
+display_name = "Application Security"
+oncall_slack_id = "C34567"
+autorespond = false
+
+[[ categories ]] 
+key = "privacy"
+display_name = "Privacy"
+oncall_slack_id = "U12345"
+autorespond = false
+
+[[ categories ]] 
+key = "physical_security"
+display_name = "Physical Security"
+autorespond = true
+autorespond_message = "Looking for Physical or Office Security? You can reach out to physical-security@company.com."

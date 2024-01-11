@@ -1,0 +1,71 @@
+{
+	"type": "context",
+	"elements": [
+		{
+			"type": "plain_text",
+			"text": ":thumbsup: Acknowledge this message and response directly to the inbound request.",
+			"emoji": true
+		},
+		{
+			"type": "plain_text",
+			"text": ":thumbsdown: Recategorize this message, and if defined, I will route it to the appropriate on-call. If none applies, select Other and pick a channel that I will route the user to.",
+			"emoji": true
+		}
+	]
+},
+{
+	"type": "actions",
+	"elements": [
+		{
+			"type": "button",
+			"text": {
+				"type": "plain_text",
+				"emoji": true,
+				"text": "Acknowledge"
+			},
+			"style": "primary",
+			"value": "{{ predicted_category }}",
+			"action_id": "acknowledge_submit_action"
+		},
+		{
+			"type": "button",
+			"text": {
+				"type": "plain_text",
+				"emoji": true,
+				"text": "Inaccurate, recategorize"
+			},
+			"style": "danger",
+			"value": "recategorize",
+			"action_id": "recategorize_submit_action"
+		}
+	]
+},
+{
+	"type": "section",
+	"block_id": "recategorize_select_category_block",
+	"text": {
+		"type": "mrkdwn",
+		"text": "*Select a category from the dropdown list, or*"
+	},
+	"accessory": {
+		"type": "static_select",
+		"placeholder": {
+			"type": "plain_text",
+			"text": "Select an item",
+			"emoji": true
+		},
+		"options": [
+			{% for value, text in options.items() %}
+			{
+				"text": {
+					"type": "plain_text",
+					"text": "{{ text }}",
+					"emoji": true
+				},
+				"value": "{{ value }}"
+			}{% if not loop.last %},{% endif %}
+			{% endfor %}
+		],
+		"action_id": "recategorize_select_category_action"
+	}
+}

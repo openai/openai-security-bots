@@ -1,0 +1,10 @@
+[
+	{
+		"type": "section",
+		"text": {
+			"type": "mrkdwn",
+			"text": "{{ oncall_greeting }}, is this assignment accurate?\n\n"
+		}
+	},
+	{% include 'messages/_notify_oncall_body.j2' %}
+]

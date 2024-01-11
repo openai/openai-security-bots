@@ -1,0 +1,10 @@
+[
+	{
+		"type": "section",
+		"text": {
+			"type": "mrkdwn",
+			"text": ":wave: Hi, we received an <{{ inbound_message_url }}|inbound message> in <#{{ inbound_message_channel }}>, which was categorized as {{ predicted_category }}. Is this accurate?\n\n"
+		}
+	},
+	{% include 'messages/_notify_oncall_body.j2' %}
+]

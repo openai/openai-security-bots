@@ -1,0 +1,29 @@
+[project]
+name = "openai-slackbot"
+requires-python = ">=3.8"
+version = "1.0.0"
+dependencies = [
+    "aiohttp",
+    "Jinja2",
+    "openai==0.28.0",
+    "pydantic",
+    "python-dotenv",
+    "slack-bolt",
+    "slack-sdk",
+    "pytest",
+    "pytest-env",
+    "pytest-asyncio",
+    "aiohttp",
+]
+
+[build-system]
+requires = ["setuptools>=64.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+env = [
+  "SLACK_BOT_TOKEN=mock-token",
+  "SOCKET_APP_TOKEN=mock-token",
+  "OPENAI_API_KEY=mock-key",
+]

@@ -1,0 +1,28 @@
+[
+	{
+		"type": "section",
+		"text": {
+			"type": "mrkdwn",
+			"text": "Received an <{{ inbound_message_url }}|inbound message> in <#{{ inbound_message_channel }}>:"
+		}
+	},
+	{
+		"type": "context",
+		"elements": [
+			{
+				"type": "plain_text",
+				"text": "Predicted category: {{ predicted_category }}",
+				"emoji": true
+			},
+			{
+				"type": "mrkdwn",
+				"text": "Triaged to: {{ oncall_mention }}"
+			},
+			{
+				"type": "plain_text",
+				"text": "Triage updates in the :thread:",
+				"emoji": true
+			}
+		]
+	}
+]
