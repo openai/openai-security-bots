@@ -1,0 +1,11 @@
+openai
+python-dotenv
+slack-bolt
+validators
+google-auth
+google-auth-httplib2
+google-auth-oauthlib
+google-api-python-client
+psycopg
+psycopg2-binary
+peewee

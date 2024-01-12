@@ -9,6 +9,7 @@ shared/
   openai-slackbot/
 bots/
   triage-slackbot/
+  sdlc-slackbot/
   <other bots coming!>
 ```
 
