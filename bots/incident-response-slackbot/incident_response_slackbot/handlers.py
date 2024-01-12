@@ -54,7 +54,7 @@ class InboundDirectMessageHandler(BaseMessageHandler):
         # Send the received message to the monitoring channel
         await self._slack_client.post_message(
             channel=self.config.feed_channel_id,
-            text=f"Received message from <@{event['user_profile']['name']}>:\n> {event['text']}",
+            text=f"Received message from <@{event['user']}>:\n> {event['text']}",
             thread_ts=message_ts,
         )
 
@@ -154,6 +154,9 @@ class InboundIncidentStartChatHandler(BaseActionHandler):
         alert_user_id = DATABASE.get_user_id(original_message_ts)
         user = body["user"]
 
+        name = user["name"]
+        first_name = name.split(".")[1]
+
         logger.info(f"Handling inbound incident start chat action from {user['name']}")
 
         # Update the blocks and elements
@@ -178,7 +181,8 @@ class InboundIncidentStartChatHandler(BaseActionHandler):
         logger.info(f"Alert and detail: {text_messages}")
 
         username = await self._slack_client.get_user_display_name(alert_user_id)
-        greeting_message = await create_greeting(username, text_messages)
+
+        greeting_message = await create_greeting(first_name, text_messages)
         logger.info(f"generated greeting message: {greeting_message}")
 
         # Send the greeting message to the user and to the channel

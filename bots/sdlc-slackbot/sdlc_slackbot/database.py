@@ -1,6 +1,7 @@
+import os
+
 from peewee import *
 from playhouse.db_url import *
-import os
 
 db_url = os.getenv("DATABASE_URL") or "postgres://postgres:postgres@localhost:5432/postgres"
 db = connect(db_url)
@@ -18,7 +19,8 @@ class Assessment(BaseModel):
     point_of_contact = CharField()
     estimated_go_live_date = CharField(null=True)
     outcome = CharField(null=True)
-    decision = CharField(null=True)
+    risk = IntegerField(null=True)  # Storing risk as an integer
+    confidence = IntegerField(null=True)  # Storing confidence as an integer
     justification = TextField(null=True)
 
 
@@ -35,6 +37,7 @@ class Question(Model):
 class Resource(BaseModel):
     url = TextField()
     content_hash = CharField()
+    content = TextField(null=True)
     assessment = ForeignKeyField(Assessment, backref="resources")
 
 

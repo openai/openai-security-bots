@@ -13,15 +13,7 @@ def messages_to_string(messages):
 
 
 async def get_clean_output(completion: str) -> str:
-    output = ""
-
-    for chunk in completion:
-        delta = chunk["choices"][0]["delta"]
-        if not delta:
-            break
-        output += delta.get("content", "")
-
-    return output
+    return completion.choices[0].message.content
 
 
 async def create_greeting(username, details):
@@ -32,10 +24,10 @@ async def create_greeting(username, details):
     You are a helpful cybersecurity AI analyst assistant to the security team that wants to keep
     your company secure. You just received an alert with the following details:
     {details}
-    Without being accusatory, gently ask the user, who's name is {username} in a casual tone if they were aware 
-    about the topic of the alert. 
+    Without being accusatory, gently ask the user, whose name is {username} in a casual tone if they were aware
+    about the topic of the alert.
     Keep the message brief, not more than 3 or 4 sentences.
-    Do not end with a signature. End with a question. 
+    Do not end with a signature. End with a question.
     """
 
     messages = [
@@ -43,11 +35,11 @@ async def create_greeting(username, details):
         {"role": "user", "content": ""},
     ]
 
-    completion = openai.ChatCompletion.create(
+    completion = openai.chat.completions.create(
         model="gpt-4-32k",
         messages=messages,
         temperature=0.3,
-        stream=True,
+        stream=False,
     )
     response = await get_clean_output(completion)
     return response
@@ -85,7 +77,7 @@ async def get_user_awareness(inbound_direct_message: str) -> str:
     your company secure. You just received an alert and are having a chat with the user whether
     they were aware about the details of an alert. Based on the chat so far, determine whether
     the user has answered the question of whether they were aware of the alert details, and whether
-    they were aware or not. 
+    they were aware or not.
     """
 
     messages = [
@@ -94,7 +86,7 @@ async def get_user_awareness(inbound_direct_message: str) -> str:
     ]
 
     # Call the API
-    response = openai.ChatCompletion.create(
+    response = openai.chat.completions.create(
         model="gpt-4-32k",
         messages=messages,
         temperature=0,
@@ -103,7 +95,7 @@ async def get_user_awareness(inbound_direct_message: str) -> str:
         function_call={"name": "is_user_aware"},
     )
 
-    function_args = json.loads(response["choices"][0]["message"]["function_call"]["arguments"])  # type: ignore
+    function_args = json.loads(response.choices[0].message.function_call.arguments)  # type: ignore
     return function_args
 
 
@@ -115,7 +107,7 @@ async def get_thread_summary(messages):
 
     prompt = f"""
     You are a helpful cybersecurity AI analyst assistant to the security team that wants to keep
-    your company secure. The following is a conversation that you had with the user. 
+    your company secure. The following is a conversation that you had with the user.
     Please summarize the following conversation, and note whether the user was aware or not aware
     of the alert, and whether they acted suspiciously when answering:
     {text_messages}
@@ -126,11 +118,11 @@ async def get_thread_summary(messages):
         {"role": "user", "content": ""},
     ]
 
-    completion = openai.ChatCompletion.create(
+    completion = openai.chat.completions.create(
         model="gpt-4-32k",
         messages=messages,
         temperature=0.3,
-        stream=True,
+        stream=False,
     )
     response = await get_clean_output(completion)
     return response
@@ -153,11 +145,11 @@ async def generate_awareness_question():
         {"role": "user", "content": ""},
     ]
 
-    completion = openai.ChatCompletion.create(
+    completion = openai.chat.completions.create(
         model="gpt-4-32k",
         messages=messages,
         temperature=0.5,
-        stream=True,
+        stream=False,
     )
     response = await get_clean_output(completion)
     return response

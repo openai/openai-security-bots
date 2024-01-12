@@ -5,6 +5,7 @@ import os
 import re
 import threading
 import time
+import traceback
 from logging import getLogger
 
 import validate
@@ -22,14 +23,19 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk import WebClient
 from utils import *
 
+
 logger = getLogger(__name__)
 
 
-async def send_update_notification(input, gpt_response):
+async def send_update_notification(input, response):
+    risk_str, confidence_str = risk_and_confidence_to_string(response)
+    risk_num = response["risk"]
+    confidence_num = response["confidence"]
+
     msg = f"""
     Project {input['project_name']} has been updated and has a new decision:
 
-    This project {gpt_response['decision']}. {gpt_response['justification']}
+    This new decision for the project is that it is: *{risk_str}({risk_num})* with *{confidence_str}({confidence_num})*. {response['justification']}."
     """
 
     await app.client.chat_postMessage(channel=config.notification_channel_id, text=msg)
@@ -105,9 +111,46 @@ form = [
 ]
 
 
+def risk_and_confidence_to_string(decision):
+    # Lookup tables for risk and confidence
+    risk_lookup = {
+        (1, 2): "extremely low risk",
+        (3, 3): "low risk",
+        (4, 5): "medium risk",
+        (6, 7): "medium-high risk",
+        (8, 9): "high risk",
+        (10, 10): "critical risk",
+    }
+
+    confidence_lookup = {
+        (1, 2): "extremely low confidence",
+        (3, 3): "low confidence",
+        (4, 5): "medium confidence",
+        (6, 7): "medium-high confidence",
+        (8, 9): "high confidence",
+        (10, 10): "extreme confidence",
+    }
+
+    # Function to find the appropriate string from a lookup table
+    def find_in_lookup(value, lookup):
+        for (min_val, max_val), descriptor in lookup.items():
+            if min_val <= value <= max_val:
+                return descriptor
+        return "unknown"
+
+    # Convert risk and confidence using their respective lookup tables
+    risk_str = find_in_lookup(decision["risk"], risk_lookup)
+    confidence_str = find_in_lookup(decision["confidence"], confidence_lookup)
+
+    return risk_str, confidence_str
+
+
 def decision_msg(response):
-    return f"Thanks for your response! Based on this input, we've decided that this project \
-            {response['decision']}. {response['justification']}."
+    risk_str, confidence_str = risk_and_confidence_to_string(response)
+    risk_num = response["risk"]
+    confidence_num = response["confidence"]
+
+    return f"Thanks for your response! Based on this input, we've decided that this project is *{risk_str}({risk_num})* with *{confidence_str}({confidence_num})*. {response['justification']}."
 
 
 skip_params = set(
@@ -132,7 +175,7 @@ def summarize_params(params):
     summary = {}
     for k, v in params.items():
         if k not in skip_params:
-            summary[k] = ask_gpt(
+            summary[k] = ask_ai(
                 config.base_prompt + config.summary_prompt, v[: config.context_limit]
             )
         else:
@@ -157,13 +200,40 @@ def get_response_with_retry(prompt, context, max_retries=1):
     retries = 0
     while retries <= max_retries:
         try:
-            response = json.loads(ask_gpt(prompt, context))
+            response = ask_ai(prompt, context)
             return response
         except json.JSONDecodeError as e:
             logger.error(f"JSON error on attempt {retries + 1}: {e}")
             retries += 1
             if retries > max_retries:
                 return {}
+
+
+def normalize_response(response):
+    if isinstance(response, list):
+        return [json.loads(block.text) for block in response]
+    elif isinstance(response, dict):
+        return [response]
+    else:
+        raise TypeError("Unsupported response type")
+
+
+def clean_normalized_response(normalized_responses):
+    """
+    Remove the 'decision' key from each dictionary in a list of dictionaries.
+    Break it down into 'risk' and 'confidence'
+
+    :param normalized_responses: A list of dictionaries.
+    :return: The list of dictionaries with 'decision' key broken down.
+    """
+    for response in normalized_responses:
+        if "decision" in response:
+            decision = response["decision"]
+            response["risk"] = decision.get("risk")
+            response["confidence"] = decision.get("confidence")
+            response.pop("decision", None)
+
+    return normalized_responses
 
 
 async def submit_form(ack, body, say):
@@ -219,25 +289,29 @@ async def submit_form(ack, body, say):
         if not response:
             return
 
-        if response["outcome"] == "decision":
-            assessment.update(**response).execute()
-            say(text=decision_msg(response), thread_ts=ts)
-        elif response["outcome"] == "followup":
-            db_questions = [dict(assessment=assessment, question=q) for q in response["questions"]]
-            Question.insert_many(db_questions).execute()
+        normalized_response = normalize_response(response)
+        clean_response = clean_normalized_response(normalized_response)
 
-            form = []
-            for i, q in enumerate(response["questions"]):
-                form.append(
-                    input_block(
-                        f"question_{i}",
-                        q,
-                        field("plain_text_input", "...", multiline=True),
+        for item in clean_response:
+            if item["outcome"] == "decision":
+                assessment.update(**item).execute()
+                await say(text=decision_msg(item), thread_ts=ts)
+            elif item["outcome"] == "followup":
+                db_questions = [dict(assessment=assessment, question=q) for q in item["questions"]]
+                Question.insert_many(db_questions).execute()
+
+                form = []
+                for i, q in enumerate(item["questions"]):
+                    form.append(
+                        input_block(
+                            f"question_{i}",
+                            q,
+                            field("plain_text_input", "...", multiline=True),
+                        )
                     )
-                )
-            form.append(submit_block(f"submit_followup_questions_{assessment.id}"))
+                form.append(submit_block(f"submit_followup_questions_{assessment.id}"))
 
-            await say(blocks=form, thread_ts=ts)
+                await say(blocks=form, thread_ts=ts)
     except validate.ValidationError as e:
         await say(text=f"{e.field}: {e.issue}", thread_ts=ts)
     except Exception as e:
@@ -273,10 +347,25 @@ async def submit_followup_questions(ack, body, say):
             question.save()
 
         context = model_params_to_str(params)
-        response = json.loads(ask_gpt(config.base_prompt, context))
 
-        assessment.update(**response).execute()
-        await say(text=decision_msg(response), thread_ts=ts)
+        response = ask_ai(config.base_prompt, context)
+        text_to_update = response
+        if (
+            isinstance(response, dict)
+            and "text" in response
+            and "type" in response
+            and response["type"] == "text"
+        ):
+            # Extract the text from the content block
+            text_to_update = response.text
+
+        normalized_response = normalize_response(text_to_update)
+        clean_response = clean_normalized_response(normalized_response)
+
+        for item in clean_response:
+            if item["outcome"] == "decision":
+                assessment.update(**item).execute()
+                await say(text=decision_msg(item), thread_ts=ts)
 
     except Exception as e:
         logger.error(f"error: {e} processing followup questions: {json.dumps(body, indent=2)}")
@@ -295,9 +384,15 @@ def update_resources():
 
                 changed = False
 
+                previous_content = ""
+
                 for resource in assessment.resources:
                     new_content = asyncio.run(fetch_content(resource.url))
+
                     if resource.content_hash != hash_content(new_content):
+                        # just save previous content in memory temporarily
+                        previous_content = resource.content
+                        resource.content = new_content
                         new_params[resource.url] = new_content
                         changed = True
 
@@ -307,35 +402,39 @@ def update_resources():
                     old_context = model_params_to_str(assessment_params)
                     new_context = model_params_to_str(new_params)
 
-                    context = f"""
-                    Here is your previous context:
-                    {old_context}
+                    context = {
+                        "previous_context": previous_content,
+                        "previous_decision": {
+                            "risk": assessment.risk,
+                            "confidence": assessment.confidence,
+                            "justification": assessment.justification,
+                        },
+                        "new_context": new_content,
+                    }
 
-                    Here is your previous decision:
-                    {assessment.decision}
-                    {assessment.justification}
+                    context_json = json.dumps(context, indent=2)
 
-                    Here is the updated content:
-                    {new_context}
-                    """
+                    new_response = ask_ai(config.base_prompt + config.update_prompt, context_json)
 
-                    new_response = json.loads(
-                        ask_gpt(config.base_prompt + config.update_prompt, context)
-                    )
+                    resource.content_hash = hash_content(new_content)
+                    resource.save()
 
                     if new_response["outcome"] == "unchanged":
                         continue
 
-                    assessment.update(**new_response).execute()
-                    resource.content_hash = hash_content(new_content)
-                    resource.save()
+                    normalized_response = normalize_response(new_response)
+                    clean_response = clean_normalized_response(normalized_response)
+
+                    for item in clean_response:
+                        assessment.update(**item).execute()
 
                     asyncio.run(send_update_notification(assessment_params, new_response))
         except Exception as e:
             logger.error(f"error: {e} updating resources")
+            traceback.print_exc()
 
 
-monitor_thread_sleep_seconds = 3
+monitor_thread_sleep_seconds = 6
 
 if __name__ == "__main__":
     current_dir = os.path.dirname(os.path.abspath(__file__))

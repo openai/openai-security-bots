@@ -5,7 +5,7 @@ version = "1.0.0"
 dependencies = [
     "aiohttp",
     "Jinja2",
-    "openai==0.28.0",
+    "openai",
     "pydantic",
     "python-dotenv",
     "slack-bolt",

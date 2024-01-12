@@ -24,6 +24,21 @@ $ make init-env-file
 ```
 and fill in the right values.
 
+Your Slack App needs the following scopes:
+
+- app\_mentions:read
+- channels:join
+- channels:read
+- channels:history
+- chat:write
+- groups:history
+- groups:read
+- groups:write
+- usergroups:read
+- users:read
+- users:read.email
+
+
 ## Setup
 
 From the current directory, run:

@@ -42,8 +42,8 @@ async def get_predicted_category(inbound_request_content: str) -> str:
     ]
 
     # Call the API
-    response = openai.ChatCompletion.create(
-        model="gpt-4-32k-0613",
+    response = openai.chat.completions.create(
+        model="gpt-4-32k",
         messages=messages,
         temperature=0,
         stream=False,
@@ -51,5 +51,5 @@ async def get_predicted_category(inbound_request_content: str) -> str:
         function_call={"name": "get_predicted_category"},
     )
 
-    function_args = json.loads(response["choices"][0]["message"]["function_call"]["arguments"])  # type: ignore
+    function_args = json.loads(response.choices[0].message.function_call.arguments)  # type: ignore
     return function_args["category"]
