@@ -10,6 +10,7 @@ shared/
 bots/
   triage-slackbot/
   incident-response-slackbot/
+  sdlc-slackbot/
 ```
 
 Refer to each bot's README for more information and setup instruction.
