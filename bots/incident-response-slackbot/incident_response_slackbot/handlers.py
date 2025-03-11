@@ -34,20 +34,29 @@ class InboundDirectMessageHandler(BaseMessageHandler):
     async def handle(self, args):
         event = args.event
         user_id = event.get("user")
+        user_text = event.get("text", "")
 
         if not DATABASE.user_exists(user_id):
             # If the user_id does not exist, they're not part of an active chat
+            logger.info(f"User {user_id} not found in active chats")
             return
 
         message_ts = DATABASE.get_ts(user_id)
+        logger.info(f"Processing message from user {user_id}: {user_text}")
+        
         await self.send_message_to_channel(event, message_ts)
 
-        user_awareness = await get_user_awareness(event["text"])
-        logger.info(f"User awareness decision: {user_awareness}")
+        user_awareness = await get_user_awareness(user_text)
+        logger.info(f"User awareness decision for '{user_text}': {user_awareness}")
 
-        if user_awareness["has_answered"]:
+        if user_awareness.get("needs_context", False):
+            logger.info(f"User {user_id} needs more context, providing additional information")
+            await self.provide_additional_context(user_id, message_ts)
+        elif user_awareness["has_answered"]:
+            logger.info(f"User {user_id} has answered, handling response")
             await self.handle_user_response(user_id, message_ts)
         else:
+            logger.info(f"User {user_id} has not answered, sending nudge")
             await self.nudge_user(user_id, message_ts)
 
     async def send_message_to_channel(self, event, message_ts):
@@ -134,6 +143,47 @@ class InboundDirectMessageHandler(BaseMessageHandler):
         await self._slack_client.post_message(
             channel=self.config.feed_channel_id,
             text=f"Sent message to <@{user_id}>:\n> {nudge_message}",
+            thread_ts=message_ts,
+        )
+
+    async def provide_additional_context(self, user_id, message_ts):
+        logger.info(f"Providing additional context for user {user_id} with thread {message_ts}")
+        
+        # Get the thread messages to provide context
+        messages = await self._slack_client.get_thread_messages(
+            channel=self.config.feed_channel_id,
+            thread_ts=message_ts,
+        )
+        
+        logger.info(f"Retrieved {len(messages)} messages from thread")
+        
+        # Find the original alert message (first message that's not a user response)
+        original_alert = "the security alert"  # default fallback
+        for message in messages:
+            if not message.get("text", "").startswith("Received message from"):
+                original_alert = message.get("text", original_alert)
+                logger.info(f"Found original alert message: {original_alert}")
+                break
+                
+        # Create a context response with the original alert and a follow-up question
+        context_message = (
+            f"Let me provide more context about this alert:\n\n"
+            f"{original_alert}\n\n"
+            f"Now that I've provided more context, could you let me know if you were aware of this activity?"
+        )
+        
+        logger.info(f"Sending context message to user {user_id}")
+        
+        # Send the context message to the user
+        await self._slack_client.post_message(
+            channel=user_id,
+            text=context_message,
+        )
+
+        # Send message to the channel
+        await self._slack_client.post_message(
+            channel=self.config.feed_channel_id,
+            text=f"Sent additional context to <@{user_id}> and asked for awareness",
             thread_ts=message_ts,
         )
 

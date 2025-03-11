@@ -48,36 +48,54 @@ async def create_greeting(username, details):
 aware_decision_function = [
     {
         "name": "is_user_aware",
-        "description": "Determines if the user has answered whether they were aware, and what that response is.",
+        "description": "Determines if the user has answered whether they were aware, what that response is, and if they need more context.",
         "parameters": {
             "type": "object",
             "properties": {
                 "has_answered": {
                     "type": "boolean",
-                    "description": "Determine whether user answered the quesiton of whether they were aware.",
+                    "description": "Determine whether user answered the question of whether they were aware.",
                 },
                 "is_aware": {
                     "type": "boolean",
                     "description": "Determine whether user was aware of the alert details.",
                 },
+                "needs_context": {
+                    "type": "boolean",
+                    "description": "Determine whether user is asking for more context or clarification about the alert.",
+                }
             },
-            "required": ["has_answered", "is_aware"],
+            "required": ["has_answered", "is_aware", "needs_context"],
         },
     }
 ]
 
 
-async def get_user_awareness(inbound_direct_message: str) -> str:
+async def get_user_awareness(inbound_direct_message: str) -> dict:
     """
-    This function uses the OpenAI Chat Completion API to determine whether user was aware.
+    This function uses the OpenAI Chat Completion API to determine whether user was aware
+    and if they need more context.
+    Returns a dictionary with keys: has_answered (bool), is_aware (bool), needs_context (bool)
     """
     # Define the prompt
     prompt = f"""
-    You are a helpful cybersecurity AI analyst assistant to the security team that wants to keep
-    your company secure. You just received an alert and are having a chat with the user whether
-    they were aware about the details of an alert. Based on the chat so far, determine whether
-    the user has answered the question of whether they were aware of the alert details, and whether
-    they were aware or not.
+    You are a helpful cybersecurity AI analyst assistant. Your task is to analyze the following user message:
+    "{inbound_direct_message}"
+
+    Determine:
+    1. If the user is asking for more information or context about the alert
+    2. If the user has answered whether they were aware of the alert
+    3. If they have answered, whether they were aware or not
+
+    VERY IMPORTANT: If the message contains ANY of these patterns, you MUST set needs_context to true:
+    - Questions (e.g., "what?", "which alert?", "what do you mean?")
+    - Requests for information (e.g., "can you tell me more", "I need more info", "provide more details")
+    - Expressions of confusion (e.g., "I don't understand", "I'm not sure what you mean")
+    - Any response that isn't clearly about awareness
+    - Any message that seems unclear or ambiguous
+    - Requests for help or clarification
+    
+    You must be very liberal in setting needs_context to true. If there's any doubt, set it to true.
     """
 
     messages = [
@@ -95,8 +113,21 @@ async def get_user_awareness(inbound_direct_message: str) -> str:
         function_call={"name": "is_user_aware"},
     )
 
-    function_args = json.loads(response.choices[0].message.function_call.arguments)  # type: ignore
-    return function_args
+    function_args = json.loads(response.choices[0].message.function_call.arguments)
+    
+    # Force needs_context to true for common patterns
+    if any(pattern in inbound_direct_message.lower() for pattern in [
+        "what", "tell me more", "more info", "help", "context", "details",
+        "don't understand", "not sure", "?"
+    ]):
+        function_args["needs_context"] = True
+    
+    # Ensure all required keys exist with default values
+    return {
+        "has_answered": function_args.get("has_answered", False),
+        "is_aware": function_args.get("is_aware", False),
+        "needs_context": function_args.get("needs_context", True)  # Default to True if not present
+    }
 
 
 async def get_thread_summary(messages):

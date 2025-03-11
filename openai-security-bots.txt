@@ -1,0 +1,5600 @@
+Directory structure:
+└── openai-openai-security-bots/
+    ├── .pre-commit-config.yaml
+    ├── bots/
+    │   ├── incident-response-slackbot/
+    │   │   ├── tests/
+    │   │   │   ├── test_openai.py
+    │   │   │   ├── __init__.py
+    │   │   │   ├── conftest.py
+    │   │   │   ├── test_handlers.py
+    │   │   │   └── test_config.toml
+    │   │   ├── scripts/
+    │   │   │   ├── alerts.toml
+    │   │   │   ├── alert_feed.py
+    │   │   │   └── send_alert.py
+    │   │   ├── pyproject.template.toml
+    │   │   ├── Makefile
+    │   │   ├── incident_response_slackbot/
+    │   │   │   ├── handlers.py
+    │   │   │   ├── config.py
+    │   │   │   ├── openai_utils.py
+    │   │   │   ├── .env.template
+    │   │   │   ├── config.toml
+    │   │   │   ├── bot.py
+    │   │   │   ├── templates/
+    │   │   │   │   └── messages/
+    │   │   │   │       └── incident_alert.j2
+    │   │   │   └── db/
+    │   │   │       └── database.py
+    │   │   └── README.md
+    │   ├── sdlc-slackbot/
+    │   │   ├── pyproject.template.toml
+    │   │   ├── Makefile
+    │   │   ├── requirements.txt
+    │   │   ├── setup.py
+    │   │   ├── sdlc_slackbot/
+    │   │   │   ├── config.py
+    │   │   │   ├── database.py
+    │   │   │   ├── validate.py
+    │   │   │   ├── gdoc.py
+    │   │   │   ├── .env.template
+    │   │   │   ├── config.toml
+    │   │   │   ├── bot.py
+    │   │   │   └── utils.py
+    │   │   └── README.md
+    │   └── triage-slackbot/
+    │       ├── tests/
+    │       │   ├── __init__.py
+    │       │   ├── conftest.py
+    │       │   ├── test_handlers.py
+    │       │   └── test_config.toml
+    │       ├── pyproject.template.toml
+    │       ├── triage_slackbot/
+    │       │   ├── handlers.py
+    │       │   ├── config.py
+    │       │   ├── openai_utils.py
+    │       │   ├── .env.template
+    │       │   ├── config.toml
+    │       │   ├── category.py
+    │       │   ├── bot.py
+    │       │   └── templates/
+    │       │       ├── messages/
+    │       │       │   ├── notify_oncall_in_feed.j2
+    │       │       │   ├── _notify_oncall_body.j2
+    │       │       │   ├── autorespond.j2
+    │       │       │   ├── notify_oncall_channel.j2
+    │       │       │   └── feed.j2
+    │       │       └── blocks/
+    │       │           ├── select_conversation.j2
+    │       │           ├── empty_category_warning.j2
+    │       │           └── empty_conversation_warning.j2
+    │       ├── Makefile
+    │       └── README.md
+    ├── Makefile
+    ├── shared/
+    │   └── openai-slackbot/
+    │       ├── setup.cfg
+    │       ├── tests/
+    │       │   ├── __init__.py
+    │       │   ├── test_bot.py
+    │       │   ├── conftest.py
+    │       │   ├── test_handlers.py
+    │       │   └── clients/
+    │       │       ├── __init__.py
+    │       │       └── test_slack.py
+    │       ├── pyproject.toml
+    │       └── openai_slackbot/
+    │           ├── handlers.py
+    │           ├── __init__.py
+    │           ├── bot.py
+    │           ├── clients/
+    │           │   ├── __init__.py
+    │           │   └── slack.py
+    │           └── utils/
+    │               ├── envvars.py
+    │               ├── __init__.py
+    │               └── slack.py
+    ├── SECURITY.md
+    ├── CODEOWNERS
+    ├── LICENSE
+    └── README.md
+
+================================================
+File: /.pre-commit-config.yaml
+================================================
+repos:
+- repo: local
+  hooks:
+    - id: trufflehog
+      name: TruffleHog
+      description: Detect secrets in your data.
+      entry: bash -c 'trufflehog git file://. --since-commit HEAD --fail'
+      language: system
+      stages: ["commit", "push"]
+
+- repo: https://github.com/hauntsaninja/black-pre-commit-mirror
+  rev: 23.10.1
+  hooks:
+    - id: black
+      args: [--line-length=100, --workers=6]
+
+- repo: https://github.com/pycqa/isort
+  rev: 5.12.0
+  hooks:
+    - id: isort
+      name: isort (python)
+
+
+================================================
+File: /bots/incident-response-slackbot/tests/test_openai.py
+================================================
+# in tests/test_openai_utils.py
+from unittest.mock import patch
+
+import pytest
+from incident_response_slackbot.openai_utils import get_user_awareness
+
+
+@pytest.mark.asyncio
+@patch("openai.ChatCompletion.create")
+async def test_get_user_awareness(mock_create):
+    # Arrange
+    mock_create.return_value = {
+        "choices": [
+            {
+                "message": {
+                    "function_call": {"arguments": '{"has_answered": true, "is_aware": false}'}
+                }
+            }
+        ]
+    }
+    inbound_direct_message = "mock_inbound_direct_message"
+
+    # Act
+    result = await get_user_awareness(inbound_direct_message)
+
+    # Assert
+    assert result == {"has_answered": True, "is_aware": False}
+
+
+================================================
+File: /bots/incident-response-slackbot/tests/conftest.py
+================================================
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+import toml
+from incident_response_slackbot.config import load_config
+from pydantic import ValidationError
+
+####################
+##### FIXTURES #####
+####################
+
+
+@pytest.fixture(autouse=True)
+def mock_config():
+    # Load the test config
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(current_dir, "test_config.toml")
+    try:
+        config = load_config(config_path)
+    except ValidationError as e:
+        print(f"Error validating the config: {e}")
+        raise
+    return config
+
+
+@pytest.fixture()
+def mock_slack_client():
+    # Mock the Slack client
+    slack_client = MagicMock()
+    slack_client.post_message = AsyncMock()
+    slack_client.update_message = AsyncMock()
+    slack_client.get_original_blocks = AsyncMock()
+    slack_client.get_thread_messages = AsyncMock()
+
+    return slack_client
+
+
+@pytest.fixture(autouse=True)
+@patch("openai.ChatCompletion.create")
+def mock_chat_completion(mock_create):
+    mock_create.return_value = {
+        "id": "chatcmpl-1234567890",
+        "object": "chat.completion",
+        "created": 1640995200,
+        "model": "gpt-4-32k",
+        "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "This is a mock response from the OpenAI API.",
+                },
+                "finish_reason": "stop",
+                "index": 0,
+            }
+        ],
+    }
+    yield
+
+
+@pytest.fixture
+def mock_generate_awareness_question():
+    with patch(
+        "incident_response_slackbot.handlers.generate_awareness_question",
+        new_callable=AsyncMock,
+    ) as mock_generate_question:
+        mock_generate_question.return_value = "Mock question"
+        yield mock_generate_question
+
+
+@pytest.fixture
+def mock_get_thread_summary():
+    with patch(
+        "incident_response_slackbot.handlers.get_thread_summary",
+        new_callable=AsyncMock,
+    ) as mock_get_summary:
+        mock_get_summary.return_value = "Mock summary"
+        yield mock_get_summary
+
+
+================================================
+File: /bots/incident-response-slackbot/tests/test_handlers.py
+================================================
+# in tests/test_handlers.py
+from unittest.mock import AsyncMock, MagicMock, patch
+from collections import namedtuple
+
+import pytest
+from incident_response_slackbot.handlers import (
+    InboundDirectMessageHandler,
+    InboundIncidentStartChatHandler,
+    InboundIncidentDoNothingHandler,
+    InboundIncidentEndChatHandler,
+)
+
+
+@pytest.mark.asyncio
+async def test_send_message_to_channel(mock_slack_client, mock_config):
+    # Arrange
+    handler = InboundDirectMessageHandler(slack_client=mock_slack_client)
+    mock_event = {"text": "mock_event_text", "user_profile": {"name": "mock_user_name"}}
+    mock_message_ts = "mock_message_ts"
+
+    # Act
+    await handler.send_message_to_channel(mock_event, mock_message_ts)
+
+    # Assert
+    mock_slack_client.post_message.assert_called_once_with(
+        channel=mock_config.feed_channel_id,
+        text="Received message from <@mock_user_name>:\n> mock_event_text",
+        thread_ts=mock_message_ts,
+    )
+
+
+@pytest.mark.asyncio
+async def test_end_chat(mock_slack_client, mock_config):
+    # Define the return value for get_original_blocks
+    mock_slack_client.get_original_blocks.return_value = [
+        {"type": "section", "block_id": "block1"},
+        {"type": "actions", "block_id": "block2"},
+        {"type": "section", "block_id": "block3"},
+    ]
+
+    # Create an instance of the handler
+    handler = InboundDirectMessageHandler(slack_client=mock_slack_client)
+
+    # Call the end_chat method
+    await handler.end_chat("12345")
+
+    # Assert that update_message was called with the correct arguments
+    mock_slack_client.update_message.assert_called_once()
+
+    # Get the actual call arguments
+    args, kwargs = mock_slack_client.update_message.call_args
+
+    # Check the blocks argument
+    assert kwargs["blocks"] == [
+        {"type": "section", "block_id": "block1"},
+        {"type": "section", "block_id": "block3"},
+        {
+            "type": "section",
+            "block_id": "end_chat_automatically",
+            "text": {
+                "type": "mrkdwn",
+                "text": "The chat was automatically ended from SecurityBot review. :done_:",
+                "verbatim": True,
+            },
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_nudge_user(mock_slack_client, mock_config, mock_generate_awareness_question):
+    # Create an instance of the handler
+    handler = InboundDirectMessageHandler(slack_client=mock_slack_client)
+
+    # Call the nudge_user method
+    await handler.nudge_user("user123", "12345")
+
+    # Assert that post_message was called twice with the correct arguments
+    assert mock_slack_client.post_message.call_count == 2
+    mock_slack_client.post_message.assert_any_call(channel="user123", text="Mock question")
+    mock_slack_client.post_message.assert_any_call(
+        channel=handler.config.feed_channel_id,
+        text="Sent message to <@user123>:\n> Mock question",
+        thread_ts="12345",
+    )
+
+
+@pytest.mark.asyncio
+async def test_incident_start_chat_handle(mock_slack_client, mock_config):
+    # Create an instance of the handler
+    handler = InboundIncidentStartChatHandler(slack_client=mock_slack_client)
+
+    # Create a mock args object
+    args = MagicMock()
+    args.body = {
+        "container": {"message_ts": "12345"},
+        "user": {"name": "test_user", "id": "user123"},
+    }
+
+    # Mock the DATABASE.get_user_id method
+    with patch(
+        "incident_response_slackbot.handlers.DATABASE.get_user_id", return_value="alert_user123"
+    ) as mock_get_user_id, patch(
+        "incident_response_slackbot.handlers.create_greeting",
+        new_callable=AsyncMock,
+        return_value="greeting message",
+    ) as mock_create_greeting, patch.object(
+        handler._slack_client, "get_thread_messages", new_callable=AsyncMock
+    ), patch.object(
+        handler._slack_client, "update_message", new_callable=AsyncMock
+    ), patch.object(
+        handler._slack_client,
+        "get_user_display_name",
+        new_callable=AsyncMock,
+        return_value="username",
+    ), patch.object(
+        handler._slack_client, "post_message", new_callable=AsyncMock
+    ):
+        # Call the handle method
+        await handler.handle(args)
+
+        # Assert that the slack client methods were called with the correct arguments
+        handler._slack_client.get_thread_messages.assert_called_once_with(
+            channel=mock_config.feed_channel_id, thread_ts="12345"
+        )
+        handler._slack_client.update_message.assert_called_once()
+        handler._slack_client.get_user_display_name.assert_called_once_with("alert_user123")
+
+        # Assert that post_message was called twice
+        assert handler._slack_client.post_message.call_count == 2
+
+        # Assert that post_message was called with the correct arguments
+        handler._slack_client.post_message.assert_any_call(
+            channel="alert_user123", text="greeting message"
+        )
+
+
+@pytest.mark.asyncio
+async def test_do_nothing_handle(mock_slack_client, mock_config):
+    # Create an instance of the handler
+    handler = InboundIncidentDoNothingHandler(slack_client=mock_slack_client)
+
+    # Create a mock args object
+    args = MagicMock()
+    args.body = {
+        "user": {"id": "user123"},
+        "message": {"ts": "12345", "blocks": [{"type": "actions"}, {"type": "section"}]},
+    }
+
+    # Call the handle method
+    await handler.handle(args)
+
+    # Assert that the slack client update_message method was called with the correct arguments
+    mock_slack_client.update_message.assert_called_once_with(
+        channel=mock_config.feed_channel_id,
+        blocks=[
+            {"type": "section"},
+            {
+                "type": "section",
+                "block_id": "do_nothing",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "<@user123> decided that no action was necessary :done_:",
+                    "verbatim": True,
+                },
+            },
+        ],
+        ts="12345",
+        text="Do Nothing action selected",
+    )
+
+
+@pytest.mark.asyncio
+async def test_end_chat_handle(mock_slack_client, mock_config, mock_get_thread_summary):
+    # Mock the Slack client and the database
+    with patch(
+        "incident_response_slackbot.handlers.Database", new_callable=AsyncMock
+    ) as MockDatabase:
+        # Instantiate the handler
+        handler = InboundIncidentEndChatHandler(slack_client=mock_slack_client)
+
+        # Define a namedtuple for args
+        Args = namedtuple("Args", ["body"])
+
+        # Instantiate the args object
+        args = Args(body={"user": {"id": "user_id"}, "message": {"ts": "message_ts"}})
+
+        # Mock the get_user_id method of the database to return a user id
+        MockDatabase.get_user_id.return_value = "alert_user_id"
+
+        # Call the handle method
+        await handler.handle(args)
+
+        # Assert that the correct methods were called with the expected arguments
+        mock_slack_client.get_original_blocks.assert_called_once_with(
+            "message_ts", mock_config.feed_channel_id
+        )
+        mock_slack_client.update_message.assert_called()
+        mock_slack_client.post_message.assert_called()
+
+
+================================================
+File: /bots/incident-response-slackbot/tests/test_config.toml
+================================================
+# Organization ID associated with OpenAI API key.
+openai_organization_id = "mock_openai_organization_id"
+
+# Where the alerts will be posted.
+feed_channel_id = "mock_feed_channel_id"
+
+
+
+================================================
+File: /bots/incident-response-slackbot/scripts/alerts.toml
+================================================
+# Alert Examples - These are the alerts that will be sent to the feed channel.
+[[alerts]]
+id = "pivot"
+name = "Pivoting"
+description = "User was found pivoting from one host to another"
+user_id = "<insert slack user id here>"
+
+[alerts.properties]
+source_host = "source.machine.org"
+destination_host = "destination.machine.org"
+
+[[alerts]]
+id = "privesc"
+name = "Privileged Escalation"
+description = "Privileged escalation was detected"
+user_id = "<insert slack user id here>"
+
+[alerts.properties]
+previous_role = "reader"
+new_role = "admin"
+
+
+================================================
+File: /bots/incident-response-slackbot/scripts/alert_feed.py
+================================================
+import os
+from logging import getLogger
+
+from incident_response_slackbot.config import load_config, get_config
+from incident_response_slackbot.db.database import Database
+from openai_slackbot.clients.slack import CreateSlackMessageResponse, SlackClient
+from openai_slackbot.utils.envvars import string
+from slack_bolt.app.async_app import AsyncApp
+
+logger = getLogger(__name__)
+
+DATABASE = Database()
+
+load_config()
+config = get_config()
+
+async def post_alert(alert):
+    """
+    This function posts an alert to the Slack channel.
+    It first initializes the Slack client with the bot token and template path.
+    Then, it extracts the user_id, alert_name, and properties from the alert.
+    Finally, it posts the alert to the Slack channel and sends the initial details.
+
+    Args:
+        alert (dict): The alert to be posted. It should contain 'user_id', 'name', and 'properties'.
+    """
+
+    slack_bot_token = string("SLACK_BOT_TOKEN")
+    app = AsyncApp(token=slack_bot_token)
+    slack_template_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "../incident_response_slackbot/templates",
+    )
+    slack_client = SlackClient(app.client, slack_template_path)
+
+    # Extracting the user_id, alert_name, and properties from the alert
+    user_id = alert.get("user_id")
+    alert_name = alert.get("name")
+    properties = alert.get("properties")
+
+    message = await incident_feed_begin(
+        slack_client=slack_client, user_id=user_id, alert_name=alert_name
+    )
+
+    DATABASE.add(user_id, message.ts)
+
+    await initial_details(slack_client=slack_client, message=message, properties=properties)
+
+
+async def incident_feed_begin(
+    *, slack_client: SlackClient, user_id: str, alert_name: str
+) -> CreateSlackMessageResponse:
+    """
+    This function begins the incident feed by posting the initial alert message.
+    It first renders the blocks from the template with the user_id and alert_name.
+    Then, it posts the message to the Slack channel.
+
+    Args:
+        slack_client (SlackClient): The Slack client.
+        user_id (str): The Slack user ID.
+        alert_name (str): The name of the alert.
+
+    Returns:
+        CreateSlackMessageResponse: The response from creating the Slack message.
+
+    Raises:
+        Exception: If the initial alert message fails to post.
+    """
+
+    try:
+        blocks = slack_client.render_blocks_from_template(
+            "messages/incident_alert.j2",
+            {
+                "user_id": user_id,
+                "alert_name": alert_name,
+            },
+        )
+        message = await slack_client.post_message(
+            channel=config.feed_channel_id,
+            blocks=blocks,
+            text=f"{alert_name} via <@{user_id}>",
+        )
+        return message
+
+    except Exception:
+        logger.exception("Initial alert feed message failed")
+
+
+def get_alert_details(**kwargs) -> str:
+    """
+    This function returns the alert details for each key in the
+    property. Each alert could have different properties.
+    """
+    content = ""
+    for key, value in kwargs.items():
+        line = f"The value of {key} for this alert is {value}. "
+        content += line
+    if content:
+        return content
+    return "No details available for this alert."
+
+
+async def initial_details(*, slack_client: SlackClient, message, properties):
+    """
+    This function posts the initial details of an alert to a Slack thread.
+
+    Args:
+        slack_client (SlackClient): The Slack client.
+        message: The initial alert message.
+        properties: The properties of the alert.
+    """
+    thread_ts = message.ts
+    details = get_alert_details(**properties)
+
+    await slack_client.post_message(
+        channel=config.feed_channel_id, text=f"{details}", thread_ts=thread_ts
+    )
+
+
+================================================
+File: /bots/incident-response-slackbot/scripts/send_alert.py
+================================================
+import asyncio
+import os
+import random
+import time
+
+import toml
+from alert_feed import post_alert
+
+
+def load_alerts():
+    alerts_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alerts.toml")
+    with open(alerts_path, "r") as file:
+        data = toml.load(file)
+    return data
+
+
+def generate_random_alert(alerts):
+    random_alert = random.choice([0, 1])
+    print(alerts["alerts"][random_alert])
+    return alerts["alerts"][random_alert]
+
+
+async def main():
+    alerts = load_alerts()
+
+    alert = generate_random_alert(alerts)
+    await post_alert(alert)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+
+================================================
+File: /bots/incident-response-slackbot/pyproject.template.toml
+================================================
+[project]
+name = "openai-incident-response-slackbot"
+requires-python = ">=3.8"
+version = "1.0.0"
+dependencies = [
+    "toml",
+    "openai_slackbot @ file://$REPO_ROOT/shared/openai-slackbot",
+]
+
+[build-system]
+requires = ["setuptools>=64.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+env = [
+  "SLACK_BOT_TOKEN=mock-token",
+  "SOCKET_APP_TOKEN=mock-token",
+  "OPENAI_API_KEY=mock-key",
+]
+
+================================================
+File: /bots/incident-response-slackbot/Makefile
+================================================
+CWD := $(shell pwd)
+REPO_ROOT := $(shell git rev-parse --show-toplevel)
+ESCAPED_REPO_ROOT := $(shell echo $(REPO_ROOT) | sed 's/\//\\\//g')
+
+init-env-file:
+	cp ./incident_response_slackbot/.env.template ./incident_response_slackbot/.env
+
+init-pyproject:
+	cat $(CWD)/pyproject.template.toml | \
+	sed "s/\$$REPO_ROOT/$(ESCAPED_REPO_ROOT)/g" > $(CWD)/pyproject.toml 
+
+
+================================================
+File: /bots/incident-response-slackbot/incident_response_slackbot/handlers.py
+================================================
+import os
+import pickle
+import typing as t
+from enum import Enum
+from logging import getLogger
+
+from incident_response_slackbot.config import load_config, get_config
+from incident_response_slackbot.db.database import Database
+from incident_response_slackbot.openai_utils import (
+    create_greeting,
+    generate_awareness_question,
+    get_thread_summary,
+    get_user_awareness,
+    messages_to_string,
+)
+from openai_slackbot.handlers import BaseActionHandler, BaseMessageHandler
+
+logger = getLogger(__name__)
+
+DATABASE = Database()
+
+class InboundDirectMessageHandler(BaseMessageHandler):
+    """
+    Handles Direct Messages for incident response use cases
+    """
+
+    def __init__(self, slack_client):
+        super().__init__(slack_client)
+        self.config = get_config()
+
+    async def should_handle(self, args):
+        return True
+
+    async def handle(self, args):
+        event = args.event
+        user_id = event.get("user")
+
+        if not DATABASE.user_exists(user_id):
+            # If the user_id does not exist, they're not part of an active chat
+            return
+
+        message_ts = DATABASE.get_ts(user_id)
+        await self.send_message_to_channel(event, message_ts)
+
+        user_awareness = await get_user_awareness(event["text"])
+        logger.info(f"User awareness decision: {user_awareness}")
+
+        if user_awareness["has_answered"]:
+            await self.handle_user_response(user_id, message_ts)
+        else:
+            await self.nudge_user(user_id, message_ts)
+
+    async def send_message_to_channel(self, event, message_ts):
+        # Send the received message to the monitoring channel
+        await self._slack_client.post_message(
+            channel=self.config.feed_channel_id,
+            text=f"Received message from <@{event['user']}>:\n> {event['text']}",
+            thread_ts=message_ts,
+        )
+
+    async def handle_user_response(self, user_id, message_ts):
+        # User has answered the question
+        messages = await self._slack_client.get_thread_messages(
+            channel=self.config.feed_channel_id,
+            thread_ts=message_ts,
+        )
+
+        # Send the end message to the user
+        thank_you = "Thanks for your time!"
+        await self._slack_client.post_message(
+            channel=user_id,
+            text=thank_you,
+        )
+
+        # Send message to the channel
+        await self._slack_client.post_message(
+            channel=self.config.feed_channel_id,
+            text=f"Sent message to <@{user_id}>:\n> {thank_you}",
+            thread_ts=message_ts,
+        )
+
+        summary = await get_thread_summary(messages)
+
+        # Send message to the channel
+        await self._slack_client.post_message(
+            channel=self.config.feed_channel_id,
+            text=f"Here is the summary of the chat:\n> {summary}",
+            thread_ts=message_ts,
+        )
+
+        DATABASE.delete(user_id)
+
+        await self.end_chat(message_ts)
+
+    async def end_chat(self, message_ts):
+        original_blocks = await self._slack_client.get_original_blocks(
+            message_ts, self.config.feed_channel_id
+        )
+
+        # Remove action buttons and add "Chat has ended" text
+        new_blocks = [block for block in original_blocks if block.get("type") != "actions"]
+
+        # Add the "Chat has ended" text
+        new_blocks.append(
+            {
+                "type": "section",
+                "block_id": "end_chat_automatically",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"The chat was automatically ended from SecurityBot review. :done_:",
+                    "verbatim": True,
+                },
+            }
+        )
+
+        await self._slack_client.update_message(
+            channel=self.config.feed_channel_id,
+            blocks=new_blocks,
+            ts=message_ts,
+            text="Ended chat automatically",
+        )
+
+    async def nudge_user(self, user_id, message_ts):
+        # User has not answered the question
+
+        nudge_message = await generate_awareness_question()
+        # Send the greeting message to the user
+        await self._slack_client.post_message(
+            channel=user_id,
+            text=nudge_message,
+        )
+
+        # Send message to the channel
+        await self._slack_client.post_message(
+            channel=self.config.feed_channel_id,
+            text=f"Sent message to <@{user_id}>:\n> {nudge_message}",
+            thread_ts=message_ts,
+        )
+
+
+class InboundIncidentStartChatHandler(BaseActionHandler):
+    def __init__(self, slack_client):
+        super().__init__(slack_client)
+        self.config = get_config()
+
+    @property
+    def action_id(self):
+        return "start_chat_submit_action"
+
+    async def handle(self, args):
+        body = args.body
+        original_message = body["container"]
+        original_message_ts = original_message["message_ts"]
+        alert_user_id = DATABASE.get_user_id(original_message_ts)
+        user = body["user"]
+
+        name = user["name"]
+        first_name = name.split(".")[1]
+
+        logger.info(f"Handling inbound incident start chat action from {user['name']}")
+
+        # Update the blocks and elements
+        blocks = self.update_blocks(body, alert_user_id)
+
+        # Add the "Started a chat" text
+        blocks.append(self.create_chat_start_section(user["id"]))
+
+        messages = await self._slack_client.get_thread_messages(
+            channel=self.config.feed_channel_id,
+            thread_ts=original_message_ts,
+        )
+
+        message = await self._slack_client.update_message(
+            channel=self.config.feed_channel_id,
+            blocks=blocks,
+            ts=original_message_ts,
+            text=messages[0]["text"],
+        )
+
+        text_messages = messages_to_string(messages)
+        logger.info(f"Alert and detail: {text_messages}")
+
+        username = await self._slack_client.get_user_display_name(alert_user_id)
+
+        greeting_message = await create_greeting(first_name, text_messages)
+        logger.info(f"generated greeting message: {greeting_message}")
+
+        # Send the greeting message to the user and to the channel
+        await self.send_greeting_message(alert_user_id, greeting_message, original_message_ts)
+
+        logger.info(f"Succesfully started chat with user: {username}")
+
+        return message
+
+    def update_blocks(self, body, alert_user_id):
+        body_copy = body.copy()
+        new_elements = []
+        for block in body_copy.get("message", {}).get("blocks", []):
+            if block.get("type") == "actions":
+                for element in block.get("elements", []):
+                    if element.get("action_id") == "do_nothing_submit_action":
+                        element["action_id"] = "end_chat_submit_action"
+                        element["text"]["text"] = "End Chat"
+                        element["value"] = alert_user_id
+                    new_elements.append(element)
+                block["elements"] = new_elements
+        return body_copy.get("message", {}).get("blocks", [])
+
+    def create_chat_start_section(self, user_id):
+        return {
+            "type": "section",
+            "block_id": "started_chat",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"<@{user_id}> started a chat.",
+                "verbatim": True,
+            },
+        }
+
+    async def send_greeting_message(self, alert_user_id, greeting_message, original_message_ts):
+        # Send the greeting message to the user
+        await self._slack_client.post_message(
+            channel=alert_user_id,
+            text=greeting_message,
+        )
+
+        # Send message to the channel
+        await self._slack_client.post_message(
+            channel=self.config.feed_channel_id,
+            text=f"Sent message to <@{alert_user_id}>:\n> {greeting_message}",
+            thread_ts=original_message_ts,
+        )
+
+
+class InboundIncidentDoNothingHandler(BaseActionHandler):
+    """
+    Handles incoming alerts and decides whether to take no action.
+    This will close the alert and mark the status as complete.
+    """
+
+    def __init__(self, slack_client):
+        super().__init__(slack_client)
+        self.config = get_config()
+
+    @property
+    def action_id(self):
+        return "do_nothing_submit_action"
+
+    async def handle(self, args):
+        body = args.body
+        user_id = body["user"]["id"]
+        original_message_ts = body["message"]["ts"]
+
+        # Remove action buttons and add "Chat has ended" text
+        new_blocks = [
+            block
+            for block in body.get("message", {}).get("blocks", [])
+            if block.get("type") != "actions"
+        ]
+
+        # Add the "Chat has ended" text
+        new_blocks.append(
+            {
+                "type": "section",
+                "block_id": "do_nothing",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"<@{user_id}> decided that no action was necessary :done_:",
+                    "verbatim": True,
+                },
+            }
+        )
+
+        await self._slack_client.update_message(
+            channel=self.config.feed_channel_id,
+            blocks=new_blocks,
+            ts=original_message_ts,
+            text="Do Nothing action selected",
+        )
+
+
+class InboundIncidentEndChatHandler(BaseActionHandler):
+    """
+    Ends the chat manually
+    """
+
+    def __init__(self, slack_client):
+        super().__init__(slack_client)
+        self.config = get_config()
+
+    @property
+    def action_id(self):
+        return "end_chat_submit_action"
+
+    async def handle(self, args):
+        body = args.body
+        user_id = body["user"]["id"]
+        message_ts = body["message"]["ts"]
+
+        alert_user_id = DATABASE.get_user_id(message_ts)
+
+        original_blocks = await self._slack_client.get_original_blocks(
+            message_ts, self.config.feed_channel_id
+        )
+
+        # Remove action buttons and add "Chat has ended" text
+        new_blocks = [block for block in original_blocks if block.get("type") != "actions"]
+
+        # Add the "Chat has ended" text
+        new_blocks.append(
+            {
+                "type": "section",
+                "block_id": "end_chat_manually",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"<@{user_id}> has ended the chat :done_:",
+                    "verbatim": True,
+                },
+            }
+        )
+
+        await self._slack_client.update_message(
+            channel=self.config.feed_channel_id,
+            blocks=new_blocks,
+            ts=message_ts,
+            text="Ended chat automatically",
+        )
+
+        # User has answered the question
+        messages = await self._slack_client.get_thread_messages(
+            channel=self.config.feed_channel_id,
+            thread_ts=message_ts,
+        )
+
+        thank_you = "Thanks for your time!"
+        await self._slack_client.post_message(
+            channel=alert_user_id,
+            text=thank_you,
+        )
+
+        # Send message to the channel
+        await self._slack_client.post_message(
+            channel=self.config.feed_channel_id,
+            text=f"Sent message to <@{alert_user_id}>:\n> {thank_you}",
+            thread_ts=message_ts,
+        )
+
+        summary = await get_thread_summary(messages)
+
+        # Send message to the channel
+        await self._slack_client.post_message(
+            channel=self.config.feed_channel_id,
+            text=f"Here is the summary of the chat:\n> {summary}",
+            thread_ts=message_ts,
+        )
+
+        DATABASE.delete(user_id)
+
+
+================================================
+File: /bots/incident-response-slackbot/incident_response_slackbot/config.py
+================================================
+import os
+import typing as t
+
+import toml
+from dotenv import load_dotenv
+from pydantic import BaseModel
+
+_CONFIG = None
+
+
+class Config(BaseModel):
+    # OpenAI organization ID associated with OpenAI API key.
+    openai_organization_id: str
+
+    # Slack channel where triage alerts are posted.
+    feed_channel_id: str
+
+
+def load_config(config_path: str = None) -> Config:
+    load_dotenv()
+
+    if config_path is None:
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.toml")
+    with open(config_path) as f:
+        cfg = toml.loads(f.read())
+        config = Config(**cfg)
+
+    global _CONFIG
+    _CONFIG = config
+    return _CONFIG
+
+
+def get_config() -> Config:
+    global _CONFIG
+    if _CONFIG is None:
+        raise Exception("config not initialized, call load_config() first")
+    return _CONFIG
+
+
+================================================
+File: /bots/incident-response-slackbot/incident_response_slackbot/openai_utils.py
+================================================
+import json
+
+import openai
+from incident_response_slackbot.config import load_config, get_config
+
+load_config()
+config = get_config()
+
+# Convert slack threaded messages to string
+def messages_to_string(messages):
+    text_messages = " ".join([message["text"] for message in messages if "text" in message])
+    return text_messages
+
+
+async def get_clean_output(completion: str) -> str:
+    return completion.choices[0].message.content
+
+
+async def create_greeting(username, details):
+    if not openai.api_key:
+        raise Exception("OpenAI API key not found.")
+
+    prompt = f"""
+    You are a helpful cybersecurity AI analyst assistant to the security team that wants to keep
+    your company secure. You just received an alert with the following details:
+    {details}
+    Without being accusatory, gently ask the user, whose name is {username} in a casual tone if they were aware
+    about the topic of the alert.
+    Keep the message brief, not more than 3 or 4 sentences.
+    Do not end with a signature. End with a question.
+    """
+
+    messages = [
+        {"role": "system", "content": prompt},
+        {"role": "user", "content": ""},
+    ]
+
+    completion = openai.chat.completions.create(
+        model="gpt-4-32k",
+        messages=messages,
+        temperature=0.3,
+        stream=False,
+    )
+    response = await get_clean_output(completion)
+    return response
+
+
+aware_decision_function = [
+    {
+        "name": "is_user_aware",
+        "description": "Determines if the user has answered whether they were aware, and what that response is.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "has_answered": {
+                    "type": "boolean",
+                    "description": "Determine whether user answered the quesiton of whether they were aware.",
+                },
+                "is_aware": {
+                    "type": "boolean",
+                    "description": "Determine whether user was aware of the alert details.",
+                },
+            },
+            "required": ["has_answered", "is_aware"],
+        },
+    }
+]
+
+
+async def get_user_awareness(inbound_direct_message: str) -> str:
+    """
+    This function uses the OpenAI Chat Completion API to determine whether user was aware.
+    """
+    # Define the prompt
+    prompt = f"""
+    You are a helpful cybersecurity AI analyst assistant to the security team that wants to keep
+    your company secure. You just received an alert and are having a chat with the user whether
+    they were aware about the details of an alert. Based on the chat so far, determine whether
+    the user has answered the question of whether they were aware of the alert details, and whether
+    they were aware or not.
+    """
+
+    messages = [
+        {"role": "system", "content": prompt},
+        {"role": "user", "content": inbound_direct_message},
+    ]
+
+    # Call the API
+    response = openai.chat.completions.create(
+        model="gpt-4-32k",
+        messages=messages,
+        temperature=0,
+        stream=False,
+        functions=aware_decision_function,
+        function_call={"name": "is_user_aware"},
+    )
+
+    function_args = json.loads(response.choices[0].message.function_call.arguments)  # type: ignore
+    return function_args
+
+
+async def get_thread_summary(messages):
+    if not openai.api_key:
+        raise Exception("OpenAI API key not found.")
+
+    text_messages = messages_to_string(messages)
+
+    prompt = f"""
+    You are a helpful cybersecurity AI analyst assistant to the security team that wants to keep
+    your company secure. The following is a conversation that you had with the user.
+    Please summarize the following conversation, and note whether the user was aware or not aware
+    of the alert, and whether they acted suspiciously when answering:
+    {text_messages}
+    """
+
+    messages = [
+        {"role": "system", "content": prompt},
+        {"role": "user", "content": ""},
+    ]
+
+    completion = openai.chat.completions.create(
+        model="gpt-4-32k",
+        messages=messages,
+        temperature=0.3,
+        stream=False,
+    )
+    response = await get_clean_output(completion)
+    return response
+
+
+async def generate_awareness_question():
+    if not openai.api_key:
+        raise Exception("OpenAI API key not found.")
+
+    prompt = f"""
+    You are a helpful cybersecurity AI analyst assistant to the security team that wants to keep
+    your company secure. You have received an alert regarding the user you're chatting with, and
+    you have asked whether the user was aware of the alert. The user has not answered the question,
+    so now you are asking the user again whether they were aware of the alert. You ask in a gentle,
+    kind, and casual tone. You keep it short, to two sentences at most. You end with a question.
+    """
+
+    messages = [
+        {"role": "system", "content": prompt},
+        {"role": "user", "content": ""},
+    ]
+
+    completion = openai.chat.completions.create(
+        model="gpt-4-32k",
+        messages=messages,
+        temperature=0.5,
+        stream=False,
+    )
+    response = await get_clean_output(completion)
+    return response
+
+
+================================================
+File: /bots/incident-response-slackbot/incident_response_slackbot/.env.template
+================================================
+SLACK_BOT_TOKEN=xoxb- # Go to your Slack app, Settings > Install App > Bot User OAuth Token
+SOCKET_APP_TOKEN=xapp-  # Go to your Slack app, Settings > Basic Information > App-Level Tokens
+OPENAI_API_KEY=
+
+================================================
+File: /bots/incident-response-slackbot/incident_response_slackbot/config.toml
+================================================
+# Organization ID associated with OpenAI API key.
+openai_organization_id = "<replace me>"
+
+# Where the alerts will be posted.
+feed_channel_id = "<replace me>"
+
+
+
+
+================================================
+File: /bots/incident-response-slackbot/incident_response_slackbot/bot.py
+================================================
+import asyncio
+import os
+
+from incident_response_slackbot.config import load_config, get_config
+from incident_response_slackbot.handlers import (
+    InboundDirectMessageHandler,
+    InboundIncidentDoNothingHandler,
+    InboundIncidentEndChatHandler,
+    InboundIncidentStartChatHandler,
+)
+from openai_slackbot.bot import start_bot
+
+if __name__ == "__main__":
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    load_config(os.path.join(current_dir, "config.toml"))
+
+    message_handler = InboundDirectMessageHandler
+    action_handlers = [
+        InboundIncidentStartChatHandler,
+        InboundIncidentDoNothingHandler,
+        InboundIncidentEndChatHandler,
+    ]
+
+    template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+
+    config = get_config()
+    asyncio.run(
+        start_bot(
+            openai_organization_id=config.openai_organization_id,
+            slack_message_handler=message_handler,
+            slack_action_handlers=action_handlers,
+            slack_template_path=template_path,
+        )
+    )
+
+
+================================================
+File: /bots/incident-response-slackbot/incident_response_slackbot/templates/messages/incident_alert.j2
+================================================
+[
+	{
+		"type": "section",
+		"text": {
+			"type": "mrkdwn",
+			"text": "Incident: {{ alert_name }} with user <@{{ user_id }}>"
+		}
+	},
+	{
+		"type": "context",
+		"elements": [
+			{
+				"type": "plain_text",
+				"text": "Details in :thread:",
+				"emoji": true
+			}
+		]
+	},
+	{
+		"type": "actions",
+		"elements": [
+			{
+				"type": "button",
+				"text": {
+					"type": "plain_text",
+					"emoji": true,
+					"text": "Start Chat"
+				},
+				"style": "primary",
+				"value": "{{ user_id }}",
+				"action_id": "start_chat_submit_action"
+			},
+			{
+				"type": "button",
+				"text": {
+					"type": "plain_text",
+					"emoji": true,
+					"text": "Do Nothing"
+				},
+				"style": "danger",
+				"value": "recategorize",
+				"action_id": "do_nothing_submit_action"
+			}
+		]
+	}
+]
+
+
+================================================
+File: /bots/incident-response-slackbot/incident_response_slackbot/db/database.py
+================================================
+import os
+import pickle
+
+
+class Database:
+    """
+    This class represents a database for storing user messages.
+    The data is stored in a pickle file.
+    """
+
+    def __init__(self):
+        """
+        Initialize the database. Load data from the pickle file if it exists,
+        otherwise create an empty dictionary.
+        """
+        current_dir = os.path.dirname(os.path.realpath(__file__))
+        self.file_path = os.path.join(current_dir, "data.pkl")
+        self.data = {}
+
+    def _load_data(self):
+        """
+        Load data from the pickle file if it exists,
+        otherwise return an empty dictionary.
+        """
+        if os.path.exists(self.file_path):
+            with open(self.file_path, "rb") as f:
+                return pickle.load(f)
+        else:
+            return {}
+
+    def _save(self):
+        """
+        Save the current state of the database to the pickle file.
+        """
+        with open(self.file_path, "wb") as f:
+            pickle.dump(self.data, f)
+
+    # Add a new entry to the database
+    def add(self, user_id, message_ts):
+        """
+        Add a new entry to the database. If the user_id already exists,
+        update the message timestamp. Otherwise, create a new entry.
+        """
+        self.data = self._load_data()
+        self.data.setdefault(user_id, {})["message_ts"] = message_ts
+        self._save()
+
+    # Delete an entry from the database
+    def delete(self, user_id):
+        """
+        Delete an entry from the database using the user_id as the key.
+        """
+        self.data = self._load_data()
+        self.data.pop(user_id, None)
+        self._save()
+
+    # Check if user_id exists in the database
+    def user_exists(self, user_id):
+        """
+        Check if the user_id exists in the database.
+        """
+        self.data = self._load_data()
+        return user_id in self.data
+
+    # Return the message timestamp for a given user_id
+    def get_ts(self, user_id):
+        """
+        Return the message timestamp for a given user_id.
+        """
+        self.data = self._load_data()
+        return self.data[user_id]["message_ts"]
+
+    # Return the user_id given a message_ts
+    def get_user_id(self, message_ts):
+        """
+        Return the user_id given a message_ts.
+        """
+        self.data = self._load_data()
+        for user_id, data in self.data.items():
+            if data["message_ts"] == message_ts:
+                return user_id
+        return None
+
+
+================================================
+File: /bots/incident-response-slackbot/README.md
+================================================
+<p align="center">
+  <img width="150" alt="triage-slackbot-logo" src="https://github.com/openai/openai-security-bots/assets/124844323/5ac519fa-db9b-43f4-90cb-4d6d84240853](https://github.com/openai/openai-security-bots/assets/124844323/5ac519fa-db9b-43f4-90cb-4d6d84240853">
+  <h1 align="center">Incident Response Slackbot</h1>
+</p>
+
+Incident Response Slackbot automatically chats with users who have been part of an incident alert.
+
+
+
+## Prerequisites
+
+You will need:
+1. A Slack application (aka your triage bot) with Socket Mode enabled
+2. OpenAI API key
+
+Grab your `SLACK_BOT_TOKEN` by Oauth & Permissions tab in your Slack App page.
+
+Generate an App-level token for your Slack app, by going to:
+```
+Your Slack App > Basic Information > App-Level Tokens > Generate Token and Scopes
+```
+Create a new token with `connections:write` scope. This is your `SOCKET_APP_TOKEN` token.
+
+Once you have them, from the current directory, run:
+```
+$ make init-env-file
+```
+and fill in the right values.
+
+Your Slack App needs the following scopes:
+
+ - users:read
+ - channels:history
+ - chat:write
+ - groups:history
+
+## Setup
+
+From the current directory, run:
+```
+make init-pyproject
+```
+
+From the repo root, run:
+```
+make clean-venv
+source venv/bin/activate
+make build-bot BOT=incident-response-slackbot
+```
+
+## Run bot with example configuration
+
+The example configuration is `config.toml`. Replace the configuration values as needed. In particular, the bot will post to channel `feed_channel_id`, and will take an OpenAI Organization ID associated with your OpenAI API key.
+
+⚠️ *Make sure that the bot is added to the channels it needs to read from and post to.* ⚠️
+
+We will need to add example alerts to `./scripts/alerts.toml` Replace with alert information and user_id. To get the user_id:
+1. Click on the desired user name within Slack. 
+2. Click on the ellpises (three dots).
+3. Click on "Copy Member ID".
+
+⚠️ *These are mock alerts. In real-world scenarios, this will be integrated with alert feed/database* ⚠️
+
+To generate an axample alert, in this directory, run:
+```
+python ./scripts/send_alert.py
+```
+
+An example alert will be sent to the channel.
+
+
+https://github.com/openai/openai-security-bots/assets/124844323/b919639c-b691-4b01-aa0c-7be987c9a70b
+
+
+To have the bot start listening, run the following from the repo root:
+
+```
+make run-bot BOT=incident-response-slackbot
+```
+
+Now you can start a chat with a user, or do nothing. 
+When you start a chat, 
+
+1. The bot will reach out to the user involved with the alert
+2. Post a message to the original thread in monitoring channel what was sent to the user (message generated with OpenAI API)
+3. Post any messages the user sends to original thread
+4. Checks to see if the user has answered the question using OpenAI's API.
+ - If yes, end the chat and provide a summary to the original thread
+ - If no, continues sending a message to the user, and repeats this step
+   
+Let's start a chat:
+
+https://github.com/openai/openai-security-bots/assets/124844323/4b5dd292-b4d3-437a-9809-d6d80e824a9d
+
+
+
+## Alert Details
+
+In practice, the app will connect with a database or queuing system that monitors alerts. We provide a mock alert system here, and a mock database to hold the state of users and their alerts.
+
+In the `alerts.toml` file:
+
+```
+[[ alerts ]]
+id = "pivot"
+...
+user_id = ID of person to start chat with (@harold user)
+
+[alerts.properties]
+source_host = "source.machine.org"
+destination_host = "destination.machine.org"
+
+[[ alerts ]]
+id = "privesc"
+...
+user_id = ID of person to start chat with (@harold user)
+```
+
+
+================================================
+File: /bots/sdlc-slackbot/pyproject.template.toml
+================================================
+[project]
+name = "openai-sdlc-slackbot"
+requires-python = ">=3.8"
+version = "1.0.0"
+dependencies = [
+    "toml",
+    "openai_slackbot @ file://$REPO_ROOT/shared/openai-slackbot",
+    "validators",
+    "google-auth",
+    "google-auth-httplib2",
+    "google-auth-oauthlib",
+    "google-api-python-client",
+    "psycopg",
+    "psycopg2-binary",
+    "peewee",
+]
+
+[build-system]
+requires = ["setuptools>=64.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+env = [
+  "SLACK_BOT_TOKEN=mock-token",
+  "SOCKET_APP_TOKEN=mock-token",
+  "OPENAI_API_KEY=mock-key",
+]
+
+
+================================================
+File: /bots/sdlc-slackbot/Makefile
+================================================
+CWD := $(shell pwd)
+REPO_ROOT := $(shell git rev-parse --show-toplevel)
+ESCAPED_REPO_ROOT := $(shell echo $(REPO_ROOT) | sed 's/\//\\\//g')
+
+init-env-file:
+	cp ./sdlc_slackbot/.env.template ./sdlc_slackbot/.env
+
+init-pyproject:
+	cat $(CWD)/pyproject.template.toml | \
+	sed "s/\$$REPO_ROOT/$(ESCAPED_REPO_ROOT)/g" > $(CWD)/pyproject.toml 
+
+
+================================================
+File: /bots/sdlc-slackbot/requirements.txt
+================================================
+openai
+python-dotenv
+slack-bolt
+validators
+google-auth
+google-auth-httplib2
+google-auth-oauthlib
+google-api-python-client
+psycopg
+psycopg2-binary
+peewee
+
+
+================================================
+File: /bots/sdlc-slackbot/setup.py
+================================================
+from setuptools import setup, find_packages
+
+with open("requirements.txt", "r") as f:
+    requirements = f.read().splitlines()
+
+setup(
+    name="sdlc_bot",
+    version="0.1",
+    packages=find_packages(),
+    install_requires=requirements,
+)
+
+
+================================================
+File: /bots/sdlc-slackbot/sdlc_slackbot/config.py
+================================================
+import os
+import typing as t
+
+import toml
+from dotenv import load_dotenv
+from pydantic import BaseModel, ValidationError, field_validator, model_validator
+from pydantic.functional_validators import AfterValidator, BeforeValidator
+
+_CONFIG = None
+
+
+def validate_channel(channel_id: str) -> str:
+    if not channel_id.startswith("C"):
+        raise ValueError("channel ID must start with 'C'")
+    return channel_id
+
+
+class Config(BaseModel):
+    # OpenAI organization ID associated with OpenAI API key.
+    openai_organization_id: str
+
+    context_limit: int
+
+    # OpenAI prompts
+    base_prompt: str
+    initial_prompt: str
+    update_prompt: str
+    summary_prompt: str
+
+    reviewing_message: str
+    recoverable_error_message: str
+    irrecoverable_error_message: str
+
+    # Slack channel for notifications
+    notification_channel_id: t.Annotated[str, AfterValidator(validate_channel)]
+
+
+def load_config(path: str):
+    load_dotenv()
+
+    with open(path) as f:
+        cfg = toml.loads(f.read())
+        config = Config(**cfg)
+
+    global _CONFIG
+    _CONFIG = config
+    return _CONFIG
+
+
+def get_config() -> Config:
+    global _CONFIG
+    if _CONFIG is None:
+        raise Exception("config not initialized, call load_config() first")
+    return _CONFIG
+
+
+================================================
+File: /bots/sdlc-slackbot/sdlc_slackbot/database.py
+================================================
+import os
+
+from peewee import *
+from playhouse.db_url import *
+
+db_url = os.getenv("DATABASE_URL") or "postgres://postgres:postgres@localhost:5432/postgres"
+db = connect(db_url)
+
+
+class BaseModel(Model):
+    class Meta:
+        database = db
+
+
+class Assessment(BaseModel):
+    project_name = CharField(unique=True)
+    project_description = TextField()
+    links_to_resources = TextField(null=True)
+    point_of_contact = CharField()
+    estimated_go_live_date = CharField(null=True)
+    outcome = CharField(null=True)
+    risk = IntegerField(null=True)  # Storing risk as an integer
+    confidence = IntegerField(null=True)  # Storing confidence as an integer
+    justification = TextField(null=True)
+
+
+class Question(Model):
+    question = TextField()
+    answer = TextField(null=True)
+    assessment = ForeignKeyField(Assessment, backref="questions")
+
+    class Meta:
+        database = db
+        indexes = ((("question", "assessment"), True),)
+
+
+class Resource(BaseModel):
+    url = TextField()
+    content_hash = CharField()
+    content = TextField(null=True)
+    assessment = ForeignKeyField(Assessment, backref="resources")
+
+
+db.connect()
+db.create_tables([Assessment, Question, Resource])
+
+
+================================================
+File: /bots/sdlc-slackbot/sdlc_slackbot/validate.py
+================================================
+class ValidationError(Exception):
+    def __init__(self, field, issue):
+        self.field = field
+        self.issue = issue
+        super().__init__(f"{field} {issue}")
+
+
+def required(values, *fields):
+    for f in fields:
+        if f not in values:
+            raise ValidationError(f, "required")
+        if values[f] == "":
+            raise ValidationError(f, "required")
+
+
+================================================
+File: /bots/sdlc-slackbot/sdlc_slackbot/gdoc.py
+================================================
+from __future__ import print_function
+
+import os.path
+import re
+from logging import getLogger
+
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+
+# If modifying these scopes, delete the file token.json.
+SCOPES = ["https://www.googleapis.com/auth/documents.readonly"]
+
+logger = getLogger(__name__)
+
+
+def read_paragraph_element(element):
+    """Returns the text in the given ParagraphElement.
+
+    Args:
+        element: a ParagraphElement from a Google Doc.
+    """
+    text_run = element.get("textRun")
+    if not text_run:
+        return ""
+    return text_run.get("content")
+
+
+def read_structural_elements(elements):
+    """Recurses through a list of Structural Elements to read a document's text where text may be
+    in nested elements.
+
+    Args:
+        elements: a list of Structural Elements.
+    """
+    text = ""
+    for value in elements:
+        if "paragraph" in value:
+            elements = value.get("paragraph").get("elements")
+            for elem in elements:
+                text += read_paragraph_element(elem)
+        elif "table" in value:
+            # The text in table cells are in nested Structural Elements and tables may be
+            # nested.
+            table = value.get("table")
+            for row in table.get("tableRows"):
+                cells = row.get("tableCells")
+                for cell in cells:
+                    text += read_structural_elements(cell.get("content"))
+        elif "tableOfContents" in value:
+            # The text in the TOC is also in a Structural Element.
+            toc = value.get("tableOfContents")
+            text += read_structural_elements(toc.get("content"))
+    return text
+
+
+def gdoc_creds():
+    creds = None
+    # The file token.json stores the user's access and refresh tokens, and is
+    # created automatically when the authorization flow completes for the first
+    # time.
+    creds_path = "./bots/sdlc-slackbot/sdlc_slackbot/"
+
+    if os.path.exists(creds_path + "token.json"):
+        creds = Credentials.from_authorized_user_file(creds_path + "token.json", SCOPES)
+
+    # If there are no (valid) credentials available, let the user log in.
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                creds_path + "credentials.json", SCOPES
+            )
+            creds = flow.run_local_server(port=0)
+        # Save the credentials for the next run
+        with open(creds_path + "token.json", "w") as token:
+            token.write(creds.to_json())
+
+    return creds
+
+
+def gdoc_get(gdoc_url):
+    # https://docs.google.com/document/d/<ID>/edit
+
+    result = None
+    logger.info(gdoc_url)
+    if not gdoc_url.startswith("https://docs.google.com/document") and not gdoc_url.startswith(
+        "docs.google.com/document"
+    ):
+        logger.error("Invalid google doc url")
+        return result
+
+    # This regex captures the ID after "/d/" and before an optional "/edit", "/" or the end of the string.
+    pattern = r"/d/([^/]+)"
+    match = re.search(pattern, gdoc_url)
+
+    if match:
+        document_id = match.group(1)
+        logger.info(document_id)
+    else:
+        logger.error("No ID found in the URL")
+        return result
+
+    creds = gdoc_creds()
+    try:
+        service = build("docs", "v1", credentials=creds)
+
+        # Retrieve the documents contents from the Docs service.
+        document = service.documents().get(documentId=document_id).execute()
+
+        logger.info("The title of the document is: {}".format(document.get("title")))
+
+        doc_content = document.get("body").get("content")
+        result = read_structural_elements(doc_content)
+
+    except HttpError as err:
+        logger.error(err)
+
+    return result
+
+
+================================================
+File: /bots/sdlc-slackbot/sdlc_slackbot/.env.template
+================================================
+SLACK_BOT_TOKEN=xoxb- # Go to your Slack app, Settings > Install App > Bot User OAuth Token
+SOCKET_APP_TOKEN=xapp-  # Go to your Slack app, Settings > Basic Information > App-Level Tokens
+OPENAI_API_KEY=
+
+
+================================================
+File: /bots/sdlc-slackbot/sdlc_slackbot/config.toml
+================================================
+# Organization ID associated with OpenAI API key.
+openai_organization_id = "<replace me>"
+
+notification_channel_id = "<replace me>"
+
+context_limit = 31_500
+
+base_prompt = """
+You're a highly skilled security analyst who is excellent at asking the right questions to determine the true risk of a development project to your organization.
+You work at a small company with a small security team with limited resources. You ruthlessly prioritize your team's time to ensure that you can reduce
+the greatest amount of security risk with your limited resources. Your bar for reviewing things before launch is high. They should have the potential to introduce significant security risk to your company.
+Your bar for putting things in your backlog is lower but also still high. Projects in the backlog should have the potential to be high leverage security work.
+You should base your decision on a variety of factors including but not limited to:
+- if changes would affect any path to model weights or customer data 
+- if changes are accessible from the internet
+- if changes affect end users
+- if changes affect security critical parts of the system, like authentication, authorization, encryption
+- if changes deal with historically risky technology like xml parsing
+- if changes will likely involve interpolating user input into a dynamic language like html, sql, or javascript
+
+If changes affect model weights and customer data, the risk should definitely increase. Model weights should never be exposed. Customer data should be handled extremely safely. 
+
+Be conservative about how you rate the risk score in general though. There are tons of projects and there's not enough bandwidth to cover everything in depth.
+You've been asked to analyze a new project that is being developed by another team at your company 
+and determine if and when it should be reviewed by your team. Your decision option should be two numeric scores: 
+One score for the risk: score with values between 1 and 10, where 1 means zero risk, while 10 means extremely risky and needs a security review. 
+The second score is your confidence: how confident are you about your decision, with 1 meaning very low confidence, while 10 meaning super confident.
+Put both number in the "decision" as follows: 
+
+decision: { "risk": <numeric value between 1 and 10> 
+            "confidence": <numeric value between 1 and 10>
+
+You should base your decision on how risky you think the project is to the company.
+You should also provide a brief justification for your decision. You should only respond with a json object.
+The decision object should look like this: {"outcome": "decision", "decision": { "risk": <1 to 10>, "confidence": <1 to 10>}, "justification": "I think this project is risky because..."}.
+
+Don't send any other responses. Our team has very limited resources and only wants to review the most important projects, so you
+should enforce a high bar for go live reviews.
+"""
+
+
+initial_prompt = """
+You should ask as many questions as you need to make an informed, accurate decision. Don't hesitate at all to ask followup questions.
+Ask for clarification for any critical vague language in the fields below. If the project description doesn't contain information about
+factors that are critical to your decision, ask about them.
+If you need to ask a followup question, respond with {"outcome": "followup", "questions": ["What is the project's budget?", "What is the project's timeline?"]}.
+"""
+
+update_prompt = """
+You've already reviewed this project before, but some information has changed. Below you'll find the previous project context
+your previous decision, a justification for your previous decision and the new content. If your decision still makes sense
+respond with a json object with a single property named "outcome" set to "unchanged". If your decision no longer makes sense
+respond with a new json object containing the outcome and decision. Carefuly compare the "previous_context" part with the "new_context" part and detect any changes that might be affecting security components.
+"""
+
+summary_prompt = """
+You're a highly skilled security analyst who is excellent at asking the right questions to determine the true risk of a development project to your organization.
+You work at a small company with a small security team with limited resources. You ruthlessly prioritize your team's time to ensure that you can reduce
+the greatest amount of security risk with your limited resources.
+Please provide a summary of the key security design elements, potential vulnerabilities, and recommended mitigation strategies presented in the following project document. Highlight any areas of particular concern and emphasize best practices that have been implemented. Also outline all key technical aspects of the project that you assess would require a security review. Anything that deals with data, end users, authentication, authorization, encryption, untrusted user input, internet exposure, new features or risky technologies like file processing, xml parsing and so on"
+"""
+
+reviewing_message = "Thanks for your submission! We're currently reviewing it and will let you know if we need more information and if / when you'll need a review"
+
+recoverable_error_message = "Something went wrong. We've been notified and will fix it as soon as possible. Start a new conversation to try again"
+
+irrecoverable_error_message = "Something went wrong. We've been notified and will fix it as soon as possible. Start a thread in #security if you need help immediately."
+
+
+================================================
+File: /bots/sdlc-slackbot/sdlc_slackbot/bot.py
+================================================
+import asyncio
+import hashlib
+import json
+import os
+import re
+import threading
+import time
+import traceback
+from logging import getLogger
+
+import validate
+import validators
+from database import *
+from gdoc import gdoc_get
+from openai_slackbot.bot import init_bot, start_app
+from openai_slackbot.utils.envvars import string
+from peewee import *
+from playhouse.db_url import *
+from playhouse.shortcuts import model_to_dict
+from sdlc_slackbot.config import get_config, load_config
+from slack_bolt import App
+from slack_bolt.adapter.socket_mode import SocketModeHandler
+from slack_sdk import WebClient
+from utils import *
+
+
+logger = getLogger(__name__)
+
+
+async def send_update_notification(input, response):
+    risk_str, confidence_str = risk_and_confidence_to_string(response)
+    risk_num = response["risk"]
+    confidence_num = response["confidence"]
+
+    msg = f"""
+    Project {input['project_name']} has been updated and has a new decision:
+
+    This new decision for the project is that it is: *{risk_str}({risk_num})* with *{confidence_str}({confidence_num})*. {response['justification']}."
+    """
+
+    await app.client.chat_postMessage(channel=config.notification_channel_id, text=msg)
+
+
+def hash_content(content):
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+url_pat = re.compile(
+    r"http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+\b(?!>)"
+)
+
+
+def extract_urls(text):
+    logger.info(f"extracting urls from {text}")
+    urls = re.findall(url_pat, text)
+    return [url for url in urls if validators.url(url)]
+
+
+async def async_fetch_slack(url):
+    parts = url.split("/")
+    channel = parts[-2]
+    ts = parts[-1]
+    ts = ts[1:]  # trim p
+    seconds = ts[:-6]
+    nanoseconds = ts[-6:]
+    result = await app.client.conversations_replies(channel=channel, ts=f"{seconds}.{nanoseconds}")
+    return " ".join(message.get("text", "") for message in result.data.get("messages", []))
+
+
+content_fetchers = [
+    (
+        lambda u: u.startswith(("https://docs.google.com/document", "docs.google.com/document")),
+        gdoc_get,
+    ),
+    (lambda u: "slack.com/archives" in u, async_fetch_slack),
+]
+
+
+async def fetch_content(url):
+    for condition, fetcher in content_fetchers:
+        if condition(url):
+            if asyncio.iscoroutinefunction(fetcher):
+                return await fetcher(url)  # Await the result if it's a coroutine function
+            else:
+                return fetcher(url)  # Call it directly if it's not a coroutine function
+
+
+form = [
+    input_block(
+        "project_name",
+        "Project Name",
+        field("plain_text_input", "Enter the project name"),
+    ),
+    input_block(
+        "project_description",
+        "Project Description",
+        field("plain_text_input", "Enter the project description", multiline=True),
+    ),
+    input_block(
+        "links_to_resources",
+        "Links to Resources",
+        field("plain_text_input", "Enter links to resources", multiline=True),
+    ),
+    input_block("point_of_contact", "Point of Contact", field("users_select", "Select a user")),
+    input_block(
+        "estimated_go_live_date",
+        "Estimated Go Live Date",
+        field("datepicker", "Select a date"),
+    ),
+    submit_block("submit_form"),
+]
+
+
+def risk_and_confidence_to_string(decision):
+    # Lookup tables for risk and confidence
+    risk_lookup = {
+        (1, 2): "extremely low risk",
+        (3, 3): "low risk",
+        (4, 5): "medium risk",
+        (6, 7): "medium-high risk",
+        (8, 9): "high risk",
+        (10, 10): "critical risk",
+    }
+
+    confidence_lookup = {
+        (1, 2): "extremely low confidence",
+        (3, 3): "low confidence",
+        (4, 5): "medium confidence",
+        (6, 7): "medium-high confidence",
+        (8, 9): "high confidence",
+        (10, 10): "extreme confidence",
+    }
+
+    # Function to find the appropriate string from a lookup table
+    def find_in_lookup(value, lookup):
+        for (min_val, max_val), descriptor in lookup.items():
+            if min_val <= value <= max_val:
+                return descriptor
+        return "unknown"
+
+    # Convert risk and confidence using their respective lookup tables
+    risk_str = find_in_lookup(decision["risk"], risk_lookup)
+    confidence_str = find_in_lookup(decision["confidence"], confidence_lookup)
+
+    return risk_str, confidence_str
+
+
+def decision_msg(response):
+    risk_str, confidence_str = risk_and_confidence_to_string(response)
+    risk_num = response["risk"]
+    confidence_num = response["confidence"]
+
+    return f"Thanks for your response! Based on this input, we've decided that this project is *{risk_str}({risk_num})* with *{confidence_str}({confidence_num})*. {response['justification']}."
+
+
+skip_params = set(
+    [
+        "id",
+        "project_name",
+        "links_to_resources",
+        "point_of_contact",
+        "estimated_go_live_date",
+    ]
+)
+
+multiple_whitespace_pat = re.compile(r"\s+")
+
+
+def model_params_to_str(params):
+    ss = (v for k, v in params.items() if k not in skip_params)
+    return re.sub(multiple_whitespace_pat, " ", "\n".join(map(str, ss))).strip()
+
+
+def summarize_params(params):
+    summary = {}
+    for k, v in params.items():
+        if k not in skip_params:
+            summary[k] = ask_ai(
+                config.base_prompt + config.summary_prompt, v[: config.context_limit]
+            )
+        else:
+            summary[k] = v
+
+    return summary
+
+
+async def handle_app_mention_events(say, event):
+    logger.info("App mention event received:", event)
+    await say(blocks=form, thread_ts=event["ts"])
+
+
+async def handle_message_events(say, message):
+    logger.info("message: ", message)
+    if message["channel_type"] == "im":
+        await say(blocks=form, thread_ts=message["ts"])
+
+
+def get_response_with_retry(prompt, context, max_retries=1):
+    prompt = prompt.strip().replace("\n", " ")
+    retries = 0
+    while retries <= max_retries:
+        try:
+            response = ask_ai(prompt, context)
+            return response
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON error on attempt {retries + 1}: {e}")
+            retries += 1
+            if retries > max_retries:
+                return {}
+
+
+def normalize_response(response):
+    if isinstance(response, list):
+        return [json.loads(block.text) for block in response]
+    elif isinstance(response, dict):
+        return [response]
+    else:
+        raise TypeError("Unsupported response type")
+
+
+def clean_normalized_response(normalized_responses):
+    """
+    Remove the 'decision' key from each dictionary in a list of dictionaries.
+    Break it down into 'risk' and 'confidence'
+
+    :param normalized_responses: A list of dictionaries.
+    :return: The list of dictionaries with 'decision' key broken down.
+    """
+    for response in normalized_responses:
+        if "decision" in response:
+            decision = response["decision"]
+            response["risk"] = decision.get("risk")
+            response["confidence"] = decision.get("confidence")
+            response.pop("decision", None)
+
+    return normalized_responses
+
+
+async def submit_form(ack, body, say):
+    await ack()
+
+    try:
+        ts = body["container"]["message_ts"]
+        values = body["state"]["values"]
+        params = get_form_input(
+            values,
+            "project_name",
+            "project_description",
+            "links_to_resources",
+            "point_of_contact",
+            "estimated_go_live_date",
+        )
+
+        validate.required(params, "project_name", "project_description", "point_of_contact")
+
+        await say(text=config.reviewing_message, thread_ts=ts)
+
+        try:
+            assessment = Assessment.create(**params, user_id=body["user"]["id"])
+        except IntegrityError as e:
+            raise validate.ValidationError("project_name", "must be unique")
+
+        resources = []
+        for url in extract_urls(params.get("links_to_resources", "")):
+            content = await fetch_content(url)
+            if content:
+                params[url] = content
+                resources.append(
+                    dict(
+                        assessment=assessment,
+                        url=url,
+                        content_hash=hash_content(content),
+                    )
+                )
+        Resource.insert_many(resources).execute()
+
+        context = model_params_to_str(params)
+        if len(context) > config.context_limit:
+            logger.info(f"context too long: {len(context)}. Summarizing...")
+            summarized_context = summarize_params(params)
+            context = model_params_to_str(summarized_context)
+            # FIXME: is there a better way to handle this? currently, if the summary is still too long
+            # we just give up and cut it off
+            if len(context) > config.context_limit:
+                logger.info(f"Summarized context too long: {len(context)}. Cutting off...")
+                context = context[: config.context_limit]
+
+        response = get_response_with_retry(config.base_prompt + config.initial_prompt, context)
+        if not response:
+            return
+
+        normalized_response = normalize_response(response)
+        clean_response = clean_normalized_response(normalized_response)
+
+        for item in clean_response:
+            if item["outcome"] == "decision":
+                assessment.update(**item).execute()
+                await say(text=decision_msg(item), thread_ts=ts)
+            elif item["outcome"] == "followup":
+                db_questions = [dict(assessment=assessment, question=q) for q in item["questions"]]
+                Question.insert_many(db_questions).execute()
+
+                form = []
+                for i, q in enumerate(item["questions"]):
+                    form.append(
+                        input_block(
+                            f"question_{i}",
+                            q,
+                            field("plain_text_input", "...", multiline=True),
+                        )
+                    )
+                form.append(submit_block(f"submit_followup_questions_{assessment.id}"))
+
+                await say(blocks=form, thread_ts=ts)
+    except validate.ValidationError as e:
+        await say(text=f"{e.field}: {e.issue}", thread_ts=ts)
+    except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+        await say(text=config.irrecoverable_error_message, thread_ts=ts)
+
+
+async def submit_followup_questions(ack, body, say):
+    await ack()
+
+    try:
+        assessment_id = int(body["actions"][0]["action_id"].split("_")[-1])
+        ts = body["container"]["message_ts"]
+        assessment = Assessment.get(Assessment.id == assessment_id)
+        params = model_to_dict(assessment)
+        followup_questions = [q.question for q in assessment.questions]
+    except Exception as e:
+        logger.error(f"Failed to find params for user {body['user']['id']}", e)
+        await say(text=config.recoverable_error_message, thread_ts=ts)
+        return
+
+    try:
+        await say(text=config.reviewing_message, thread_ts=ts)
+
+        values = body["state"]["values"]
+        for i, q in enumerate(followup_questions):
+            params[q] = values[f"question_{i}"][f"question_{i}_input"]["value"]
+
+        for question in assessment.questions:
+            question.answer = params[question.question]
+            question.save()
+
+        context = model_params_to_str(params)
+
+        response = ask_ai(config.base_prompt, context)
+        text_to_update = response
+        if (
+            isinstance(response, dict)
+            and "text" in response
+            and "type" in response
+            and response["type"] == "text"
+        ):
+            # Extract the text from the content block
+            text_to_update = response.text
+
+        normalized_response = normalize_response(text_to_update)
+        clean_response = clean_normalized_response(normalized_response)
+
+        for item in clean_response:
+            if item["outcome"] == "decision":
+                assessment.update(**item).execute()
+                await say(text=decision_msg(item), thread_ts=ts)
+
+    except Exception as e:
+        logger.error(f"error: {e} processing followup questions: {json.dumps(body, indent=2)}")
+        await say(text=config.irrecoverable_error_message, thread_ts=ts)
+
+
+def update_resources():
+    while True:
+        time.sleep(monitor_thread_sleep_seconds)
+        try:
+            for assessment in Assessment.select():
+                logger.info(f"checking {assessment.project_name} for updates")
+
+                assessment_params = model_to_dict(assessment)
+                new_params = assessment_params.copy()
+
+                changed = False
+
+                previous_content = ""
+
+                for resource in assessment.resources:
+                    new_content = asyncio.run(fetch_content(resource.url))
+
+                    if resource.content_hash != hash_content(new_content):
+                        # just save previous content in memory temporarily
+                        previous_content = resource.content
+                        resource.content = new_content
+                        new_params[resource.url] = new_content
+                        changed = True
+
+                    if not changed:
+                        continue
+
+                    old_context = model_params_to_str(assessment_params)
+                    new_context = model_params_to_str(new_params)
+
+                    context = {
+                        "previous_context": previous_content,
+                        "previous_decision": {
+                            "risk": assessment.risk,
+                            "confidence": assessment.confidence,
+                            "justification": assessment.justification,
+                        },
+                        "new_context": new_content,
+                    }
+
+                    context_json = json.dumps(context, indent=2)
+
+                    new_response = ask_ai(config.base_prompt + config.update_prompt, context_json)
+
+                    resource.content_hash = hash_content(new_content)
+                    resource.save()
+
+                    if new_response["outcome"] == "unchanged":
+                        continue
+
+                    normalized_response = normalize_response(new_response)
+                    clean_response = clean_normalized_response(normalized_response)
+
+                    for item in clean_response:
+                        assessment.update(**item).execute()
+
+                    asyncio.run(send_update_notification(assessment_params, new_response))
+        except Exception as e:
+            logger.error(f"error: {e} updating resources")
+            traceback.print_exc()
+
+
+monitor_thread_sleep_seconds = 6
+
+if __name__ == "__main__":
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    load_config(os.path.join(current_dir, "config.toml"))
+
+    template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+
+    config = get_config()
+
+    message_handler = []
+    action_handlers = []
+    view_submission_handlers = []
+
+    app = asyncio.run(
+        init_bot(
+            openai_organization_id=config.openai_organization_id,
+            slack_message_handler=message_handler,
+            slack_action_handlers=action_handlers,
+            slack_template_path=template_path,
+        )
+    )
+
+    # Register your custom event handlers
+    app.event("app_mention")(handle_app_mention_events)
+    app.message()(handle_message_events)
+
+    app.action("submit_form")(submit_form)
+    app.action(re.compile("submit_followup_questions.*"))(submit_followup_questions)
+
+    t = threading.Thread(target=update_resources)
+    t.start()
+
+    # Start the app
+    asyncio.run(start_app(app))
+
+
+================================================
+File: /bots/sdlc-slackbot/sdlc_slackbot/utils.py
+================================================
+import json
+import os
+from logging import getLogger
+
+# import anthropic
+import openai
+
+logger = getLogger(__name__)
+
+
+def get_form_input(values, *fields):
+    ret = {}
+    for f in fields:
+        container = values[f][f + "_input"]
+        value = container.get("value")
+        if value:
+            ret[f] = container["value"]
+        else:
+            for key, item in container.items():
+                if key.startswith("selected_") and item:
+                    ret[f] = item
+                    break
+    return ret
+
+
+def plain_text(text):
+    return dict(type="plain_text", text=text)
+
+
+def field(type, placeholder, **kwargs):
+    return dict(type=type, placeholder=plain_text(placeholder), **kwargs)
+
+
+def input_block(block_id, label, element):
+    if "action_id" not in element:
+        element["action_id"] = block_id + "_input"
+
+    return dict(
+        type="input",
+        block_id=block_id,
+        label=plain_text(label),
+        element=element,
+    )
+
+
+def submit_block(action_id):
+    return dict(
+        type="actions",
+        elements=[
+            dict(
+                type="button",
+                text=plain_text("Submit"),
+                action_id=action_id,
+                style="primary",
+            )
+        ],
+    )
+
+
+def ask_ai(prompt, context):
+    # return ask_claude(prompt, context) # YOU CAN USE CLAUDE HERE
+    response = ask_gpt(prompt, context)
+
+    # Removing leading and trailing backticks and whitespace
+    clean_response = response.strip("`\n ")
+
+    # Check if 'json' is at the beginning and remove it
+    if clean_response.lower().startswith("json"):
+        clean_response = clean_response[4:].strip()
+
+    # Remove a trailing } if it exists
+    if clean_response.endswith("}}"):
+        clean_response = clean_response[:-1]  # Remove the last character
+
+    logger.info(clean_response)
+
+    try:
+        parsed_response = json.loads(clean_response)
+        return parsed_response
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse JSON response from ask_gpt: {response}\nError: {e}")
+        return None
+
+
+def ask_gpt(prompt, context):
+    response = openai.chat.completions.create(
+        model="gpt-4-32k",
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": context},
+        ],
+    )
+    return response.choices[0].message.content
+
+
+def ask_claude(prompt, context):
+    client = anthropic.Anthropic(api_key=os.environ["CLAUDE_API_KEY"])
+    message = client.messages.create(
+        model="claude-3-opus-20240229",
+        max_tokens=4096,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return message.content
+
+
+================================================
+File: /bots/sdlc-slackbot/README.md
+================================================
+
+<p align="center">
+  <img width="150" alt="sdlc-slackbot-logo" src="https://github.com/openai/openai-security-bots/assets/4993572/70bbe02c-7c4d-4f72-b154-5df45df9e03d">
+  <h1 align="center">SDLC Slackbot</h1>
+</p>
+
+SDLC Slackbot decides if a project merits a security review.
+
+## Prerequisites
+
+You will need:
+1. A Slack application (aka your sdlc bot) with Socket Mode enabled
+2. OpenAI API key
+
+Generate an App-level token for your Slack app, by going to:
+```
+Your Slack App > Basic Information > App-Level Tokens > Generate Token and Scopes
+```
+Create a new token with `connections:write` scope. This is your `SOCKET_APP_TOKEN` token.
+
+Once you have them, from the current directory, run:
+```
+$ make init-env-file
+```
+and fill in the right values.
+
+Your Slack App needs the following scopes:
+
+- app\_mentions:read
+- channels:join
+- channels:read
+- channels:history
+- chat:write
+- groups:history
+- groups:read
+- groups:write
+- usergroups:read
+- users:read
+- users:read.email
+
+
+## Setup
+
+From the current directory, run:
+```
+make init-pyproject
+```
+
+From the repo root, run:
+```
+make clean-venv
+source venv/bin/activate
+make build-bot BOT=sdlc-slackbot
+```
+
+## Run bot with example configuration
+
+The example configuration is `config.toml`. Replace the configuration values as needed.
+You need to at least replace the `openai_organization_id` and `notification_channel_id`.
+
+For optional Google Docs integration you'll need a 'credentials.json' file:
+- Go to the Google Cloud Console.
+- Select your project.
+- Navigate to "APIs & Services" > "Credentials".
+- Under "OAuth 2.0 Client IDs", find your client ID and download the JSON file.
+- Save it in the `sdlc-slackbot/sdlc_slackbot` directory as `credentials.json`.
+
+
+
+⚠️ *Make sure that the bot is added to the channels it needs to read from and post to.* ⚠️
+
+From the repo root, run:
+
+```
+make run-bot BOT=sdlc-slackbot
+```
+
+
+
+================================================
+File: /bots/triage-slackbot/tests/conftest.py
+================================================
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from openai_slackbot.clients.slack import SlackClient
+from triage_slackbot.category import RequestCategory
+from triage_slackbot.config import load_config
+from triage_slackbot.handlers import MessageTemplatePath
+
+##########################
+##### HELPER METHODS #####
+##########################
+
+
+def bot_message_extra_data():
+    return {
+        "bot_id": "bot_id",
+        "bot_profile": {"id": "bot_profile_id"},
+        "team": "team",
+        "type": "type",
+        "user": "user",
+    }
+
+
+def recategorize_message_data(
+    *,
+    ts,
+    channel_id,
+    user,
+    message,
+    category,
+    conversation=None,
+):
+    return MagicMock(
+        ack=AsyncMock(),
+        body={
+            "actions": ["recategorize_submit_action"],
+            "container": {
+                "message_ts": ts,
+                "channel_id": channel_id,
+            },
+            "user": user,
+            "message": message,
+            "state": {
+                "values": {
+                    "recategorize_select_category_block": {
+                        "recategorize_select_category_action": {
+                            "selected_option": {
+                                "value": category,
+                            }
+                        }
+                    },
+                    "recategorize_select_conversation_block": {
+                        "recategorize_select_conversation_action": {
+                            "selected_conversation": conversation,
+                        }
+                    },
+                }
+            },
+        },
+    )
+
+
+####################
+##### FIXTURES #####
+####################
+
+
+@pytest.fixture(autouse=True)
+def mock_config():
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(current_dir, "test_config.toml")
+    return load_config(config_path)
+
+
+@pytest.fixture()
+def mock_post_message_response():
+    return AsyncMock(
+        return_value=MagicMock(
+            ok=True,
+            data={
+                "ok": True,
+                "channel": "",
+                "ts": "",
+                "message": {
+                    "blocks": [],
+                    "text": "",
+                    "ts": "",
+                    **bot_message_extra_data(),
+                },
+            },
+        )
+    )
+
+
+@pytest.fixture()
+def mock_generic_slack_response():
+    return AsyncMock(return_value=MagicMock(ok=True, data={"ok": True}))
+
+
+@pytest.fixture()
+def mock_conversations_history_response():
+    return AsyncMock(
+        return_value=MagicMock(
+            ok=True,
+            data={
+                "ok": True,
+                "messages": [
+                    {
+                        "blocks": [],
+                        "text": "",
+                        "ts": "",
+                        **bot_message_extra_data(),
+                    }
+                ],
+            },
+        )
+    )
+
+
+@pytest.fixture()
+def mock_get_permalink_response():
+    return AsyncMock(
+        return_value={
+            "ok": True,
+            "permalink": "mockpermalink",
+        },
+    )
+
+
+@pytest.fixture
+def mock_slack_asyncwebclient(
+    mock_conversations_history_response,
+    mock_generic_slack_response,
+    mock_post_message_response,
+    mock_get_permalink_response,
+):
+    with patch("slack_sdk.web.async_client.AsyncWebClient", autospec=True) as mock_client:
+        wc = mock_client.return_value
+        wc.reactions_add = mock_generic_slack_response
+        wc.chat_update = mock_generic_slack_response
+        wc.conversations_history = mock_conversations_history_response
+        wc.chat_postMessage = mock_post_message_response
+        wc.chat_getPermalink = mock_get_permalink_response
+        yield wc
+
+
+@pytest.fixture
+def mock_slack_client(mock_slack_asyncwebclient):
+    template_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "../triage_slackbot/templates"
+    )
+    return SlackClient(mock_slack_asyncwebclient, template_path)
+
+
+@pytest.fixture
+def mock_inbound_request_channel_id(mock_config):
+    return mock_config.inbound_request_channel_id
+
+
+@pytest.fixture
+def mock_feed_channel_id(mock_config):
+    return mock_config.feed_channel_id
+
+
+@pytest.fixture
+def mock_appsec_oncall_slack_channel_id(mock_config):
+    return mock_config.categories["appsec"].oncall_slack_id
+
+
+@pytest.fixture
+def mock_privacy_oncall_slack_user_id(mock_config):
+    return mock_config.categories["privacy"].oncall_slack_id
+
+
+@pytest.fixture
+def mock_appsec_oncall_slack_user():
+    return {"id": "U1234567890"}
+
+
+@pytest.fixture
+def mock_appsec_oncall_slack_user_id(mock_appsec_oncall_slack_user):
+    return mock_appsec_oncall_slack_user["id"]
+
+
+@pytest.fixture
+def mock_inbound_request_ts():
+    return "t0"
+
+
+@pytest.fixture
+def mock_feed_message_ts():
+    return "t1"
+
+
+@pytest.fixture
+def mock_notify_appsec_oncall_message_ts():
+    return "t2"
+
+
+@pytest.fixture
+def mock_appsec_oncall_recategorize_ts():
+    return "t3"
+
+
+@pytest.fixture
+def mock_inbound_request(mock_inbound_request_channel_id, mock_inbound_request_ts):
+    return MagicMock(
+        ack=AsyncMock(),
+        event={
+            "channel": mock_inbound_request_channel_id,
+            "text": "sample inbound request",
+            "thread_ts": None,
+            "ts": mock_inbound_request_ts,
+        },
+    )
+
+
+@pytest.fixture
+def mock_inbound_request_permalink(mock_inbound_request_channel_id):
+    return f"https://myorg.slack.com/archives/{mock_inbound_request_channel_id}/p1234567890"
+
+
+@pytest.fixture
+async def mock_notify_appsec_oncall_message_data(
+    mock_slack_client,
+    mock_config,
+    mock_inbound_request_channel_id,
+    mock_inbound_request_permalink,
+    mock_inbound_request_ts,
+    mock_feed_channel_id,
+    mock_feed_message_ts,
+    mock_appsec_oncall_slack_channel_id,
+    mock_notify_appsec_oncall_message_ts,
+):
+    appsec_key = "appsec"
+    remaining_categories = [c for c in mock_config.categories.values() if c.key != appsec_key]
+    blocks = mock_slack_client.render_blocks_from_template(
+        MessageTemplatePath.notify_oncall_channel.value,
+        {
+            "inbound_message_url": mock_inbound_request_permalink,
+            "inbound_message_channel": mock_inbound_request_channel_id,
+            "predicted_category": mock_config.categories[appsec_key].display_name,
+            "options": RequestCategory.to_block_options(remaining_categories),
+        },
+    )
+
+    return {
+        "ok": True,
+        "channel": mock_appsec_oncall_slack_channel_id,
+        "ts": mock_notify_appsec_oncall_message_ts,
+        "message": {
+            "blocks": blocks,
+            "text": "Notify on-call for new inbound request",
+            "metadata": {
+                "event_type": "notify_oncall",
+                "event_payload": {
+                    "inbound_message_channel": mock_inbound_request_channel_id,
+                    "inbound_message_ts": mock_inbound_request_ts,
+                    "feed_message_channel": mock_feed_channel_id,
+                    "feed_message_ts": mock_feed_message_ts,
+                    "inbound_message_url": mock_inbound_request_permalink,
+                    "predicted_category": appsec_key,
+                },
+            },
+            "ts": mock_notify_appsec_oncall_message_ts,
+            **bot_message_extra_data(),
+        },
+    }
+
+
+@pytest.fixture
+def mock_notify_appsec_oncall_message(
+    mock_notify_appsec_oncall_message_data,
+    mock_appsec_oncall_slack_channel_id,
+    mock_appsec_oncall_slack_user,
+):
+    return MagicMock(
+        ack=AsyncMock(),
+        body={
+            "actions": ["acknowledge_submit_action"],
+            "container": {
+                "message_ts": mock_notify_appsec_oncall_message_data["ts"],
+                "channel_id": mock_appsec_oncall_slack_channel_id,
+            },
+            "user": mock_appsec_oncall_slack_user,
+            "message": mock_notify_appsec_oncall_message_data["message"],
+        },
+    )
+
+
+@pytest.fixture
+def mock_appsec_oncall_recategorize_to_privacy_message(
+    mock_appsec_oncall_recategorize_ts,
+    mock_appsec_oncall_slack_channel_id,
+    mock_appsec_oncall_slack_user,
+    mock_notify_appsec_oncall_message_data,
+):
+    return recategorize_message_data(
+        ts=mock_appsec_oncall_recategorize_ts,
+        channel_id=mock_appsec_oncall_slack_channel_id,
+        user=mock_appsec_oncall_slack_user,
+        message=mock_notify_appsec_oncall_message_data["message"],
+        category="privacy",
+    )
+
+
+@pytest.fixture
+def mock_appsec_oncall_recategorize_to_other_message(
+    mock_appsec_oncall_recategorize_ts,
+    mock_appsec_oncall_slack_channel_id,
+    mock_appsec_oncall_slack_user,
+    mock_notify_appsec_oncall_message_data,
+):
+    return recategorize_message_data(
+        ts=mock_appsec_oncall_recategorize_ts,
+        channel_id=mock_appsec_oncall_slack_channel_id,
+        user=mock_appsec_oncall_slack_user,
+        message=mock_notify_appsec_oncall_message_data["message"],
+        category="other",
+        conversation="C11111",
+    )
+
+
+================================================
+File: /bots/triage-slackbot/tests/test_handlers.py
+================================================
+import json
+from unittest.mock import call, patch
+
+import pytest
+from triage_slackbot.handlers import (
+    InboundRequestAcknowledgeHandler,
+    InboundRequestHandler,
+    InboundRequestRecategorizeHandler,
+)
+from triage_slackbot.openai_utils import openai
+
+
+def get_mock_chat_completion_response(category: str):
+    category_args = json.dumps({"category": category})
+    return {
+        "choices": [
+            {
+                "message": {
+                    "function_call": {
+                        "arguments": category_args,
+                    }
+                }
+            }
+        ]
+    }
+
+
+def assert_chat_completion_called(mock_chat_completion, mock_config):
+    mock_chat_completion.create.assert_called_once_with(
+        model="gpt-4-32k-0613",
+        messages=[
+            {
+                "role": "system",
+                "content": mock_config.openai_prompt,
+            },
+            {"role": "user", "content": "sample inbound request"},
+        ],
+        temperature=0,
+        stream=False,
+        functions=[
+            {
+                "name": "get_predicted_category",
+                "description": "Predicts the category of an inbound request.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "category": {
+                            "type": "string",
+                            "enum": ["appsec", "privacy", "physical_security"],
+                            "description": "Predicted category of the inbound request",
+                        }
+                    },
+                    "required": ["category"],
+                },
+            }
+        ],
+        function_call={"name": "get_predicted_category"},
+    )
+
+
+@patch.object(openai, "ChatCompletion")
+async def test_inbound_request_handler_handle(
+    mock_chat_completion,
+    mock_config,
+    mock_slack_client,
+    mock_inbound_request,
+):
+    # Setup mocks
+    mock_chat_completion.create.return_value = get_mock_chat_completion_response("appsec")
+
+    # Call handler
+    handler = InboundRequestHandler(mock_slack_client)
+    await handler.maybe_handle(mock_inbound_request)
+
+    # Assert that handler calls OpenAI API
+    assert_chat_completion_called(mock_chat_completion, mock_config)
+
+    mock_slack_client._client.assert_has_calls(
+        [
+            call.chat_getPermalink(channel="C12345", message_ts="t0"),
+            call.chat_postMessage(
+                channel="C23456",
+                blocks=[
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": "Received an <mockpermalink|inbound message> in <#C12345>:",
+                        },
+                    },
+                    {
+                        "type": "context",
+                        "elements": [
+                            {
+                                "type": "plain_text",
+                                "text": "Predicted category: Application Security",
+                                "emoji": True,
+                            },
+                            {"type": "mrkdwn", "text": "Triaged to: <#C34567>"},
+                            {
+                                "type": "plain_text",
+                                "text": "Triage updates in the :thread:",
+                                "emoji": True,
+                            },
+                        ],
+                    },
+                ],
+                text="New inbound request received",
+            ),
+            call.chat_postMessage(
+                channel="C34567",
+                thread_ts=None,
+                blocks=[
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": ":wave: Hi, we received an <mockpermalink|inbound message> in <#C12345>, which was categorized as Application Security. Is this accurate?\n\n",
+                        },
+                    },
+                    {
+                        "type": "context",
+                        "elements": [
+                            {
+                                "type": "plain_text",
+                                "text": ":thumbsup: Acknowledge this message and response directly to the inbound request.",
+                                "emoji": True,
+                            },
+                            {
+                                "type": "plain_text",
+                                "text": ":thumbsdown: Recategorize this message, and if defined, I will route it to the appropriate on-call. If none applies, select Other and pick a channel that I will route the user to.",
+                                "emoji": True,
+                            },
+                        ],
+                    },
+                    {
+                        "type": "actions",
+                        "elements": [
+                            {
+                                "type": "button",
+                                "text": {
+                                    "type": "plain_text",
+                                    "emoji": True,
+                                    "text": "Acknowledge",
+                                },
+                                "style": "primary",
+                                "value": "Application Security",
+                                "action_id": "acknowledge_submit_action",
+                            },
+                            {
+                                "type": "button",
+                                "text": {
+                                    "type": "plain_text",
+                                    "emoji": True,
+                                    "text": "Inaccurate, recategorize",
+                                },
+                                "style": "danger",
+                                "value": "recategorize",
+                                "action_id": "recategorize_submit_action",
+                            },
+                        ],
+                    },
+                    {
+                        "type": "section",
+                        "block_id": "recategorize_select_category_block",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": "*Select a category from the dropdown list, or*",
+                        },
+                        "accessory": {
+                            "type": "static_select",
+                            "placeholder": {
+                                "type": "plain_text",
+                                "text": "Select an item",
+                                "emoji": True,
+                            },
+                            "options": [
+                                {
+                                    "text": {
+                                        "type": "plain_text",
+                                        "text": "Privacy",
+                                        "emoji": True,
+                                    },
+                                    "value": "privacy",
+                                },
+                                {
+                                    "text": {
+                                        "type": "plain_text",
+                                        "text": "Physical Security",
+                                        "emoji": True,
+                                    },
+                                    "value": "physical_security",
+                                },
+                                {
+                                    "text": {
+                                        "type": "plain_text",
+                                        "text": "Other",
+                                        "emoji": True,
+                                    },
+                                    "value": "other",
+                                },
+                            ],
+                            "action_id": "recategorize_select_category_action",
+                        },
+                    },
+                ],
+                metadata={
+                    "event_type": "notify_oncall",
+                    "event_payload": {
+                        "inbound_message_channel": "C12345",
+                        "inbound_message_ts": "t0",
+                        "feed_message_channel": "",
+                        "feed_message_ts": "",
+                        "inbound_message_url": "mockpermalink",
+                        "predicted_category": "appsec",
+                    },
+                },
+                text="Notify on-call for new inbound request",
+            ),
+        ]
+    )
+
+
+@patch.object(openai, "ChatCompletion")
+async def test_inbound_request_handler_handle_autorespond(
+    mock_chat_completion,
+    mock_config,
+    mock_slack_client,
+    mock_inbound_request,
+):
+    # Setup mocks
+    mock_chat_completion.create.return_value = get_mock_chat_completion_response(
+        "physical_security"
+    )
+
+    # Call handler
+    handler = InboundRequestHandler(mock_slack_client)
+    await handler.maybe_handle(mock_inbound_request)
+
+    # Assert that handler calls OpenAI API
+    assert_chat_completion_called(mock_chat_completion, mock_config)
+
+    mock_slack_client._client.assert_has_calls(
+        [
+            call.chat_getPermalink(channel="C12345", message_ts="t0"),
+            call.chat_postMessage(
+                channel="C23456",
+                blocks=[
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": "Received an <mockpermalink|inbound message> in <#C12345>:",
+                        },
+                    },
+                    {
+                        "type": "context",
+                        "elements": [
+                            {
+                                "type": "plain_text",
+                                "text": "Predicted category: Physical Security",
+                                "emoji": True,
+                            },
+                            {
+                                "type": "mrkdwn",
+                                "text": "Triaged to: No on-call assigned",
+                            },
+                            {
+                                "type": "plain_text",
+                                "text": "Triage updates in the :thread:",
+                                "emoji": True,
+                            },
+                        ],
+                    },
+                ],
+                text="New inbound request received",
+            ),
+            call.chat_postMessage(
+                channel="C12345",
+                thread_ts="t0",
+                text="Hi, thanks for reaching out! Looking for Physical or Office Security? You can reach out to physical-security@company.com.",
+                blocks=[
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": "Hi, thanks for reaching out! Looking for Physical or Office Security? You can reach out to physical-security@company.com.",
+                        },
+                    },
+                    {
+                        "type": "context",
+                        "elements": [
+                            {
+                                "type": "plain_text",
+                                "text": "If you feel strongly this is a Security issue, respond to this thread and someone from our team will get back to you.",
+                                "emoji": True,
+                            }
+                        ],
+                    },
+                ],
+            ),
+            call.chat_getPermalink(channel="", message_ts=""),
+            call.chat_postMessage(
+                channel="",
+                thread_ts="",
+                text="<mockpermalink|Autoresponded> to inbound request.",
+            ),
+        ]
+    )
+
+
+async def test_inbound_request_acknowledge_handler(
+    mock_slack_client,
+    mock_notify_appsec_oncall_message,
+):
+    handler = InboundRequestAcknowledgeHandler(mock_slack_client)
+    await handler.maybe_handle(mock_notify_appsec_oncall_message)
+    mock_slack_client._client.assert_has_calls(
+        [
+            call.reactions_add(
+                blocks=[],
+                channel="C34567",
+                ts="t2",
+                text=":thumbsup: <@U1234567890> acknowledged the <https://myorg.slack.com/archives/C12345/p1234567890|inbound message> triaged to Application Security.",
+            ),
+            call.chat_postMessage(
+                blocks=[],
+                channel="C23456",
+                thread_ts="t1",
+                text=":thumbsup: <@U1234567890> acknowledged the inbound message triaged to Application Security.",
+            ),
+            call.conversations_history(channel="C23456", inclusive=True, latest="t1", limit=1),
+            call.reactions_add(channel="C23456", name="thumbsup", timestamp="t1"),
+        ]
+    )
+
+
+async def test_inbound_request_recategorize_to_listed_category_handler(
+    mock_slack_client,
+    mock_appsec_oncall_recategorize_to_privacy_message,
+):
+    handler = InboundRequestRecategorizeHandler(mock_slack_client)
+    await handler.maybe_handle(mock_appsec_oncall_recategorize_to_privacy_message)
+    mock_slack_client._client.assert_has_calls(
+        [
+            call.reactions_add(
+                blocks=[],
+                channel="C34567",
+                ts="t3",
+                text=":thumbsdown: <@U1234567890> reassigned the <https://myorg.slack.com/archives/C12345/p1234567890|inbound message> from Application Security to: Privacy.",
+            ),
+            call.reactions_add(channel="C23456", name="thumbsdown", timestamp="t1"),
+            call.chat_postMessage(
+                blocks=[],
+                channel="C23456",
+                thread_ts="t1",
+                text=":thumbsdown: <@U1234567890> reassigned the inbound message from Application Security to: Privacy.",
+            ),
+            call.chat_postMessage(
+                channel="C23456",
+                thread_ts="t1",
+                blocks=[
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": ":wave: Hi <@U12345>, is this assignment accurate?\n\n",
+                        },
+                    },
+                    {
+                        "type": "context",
+                        "elements": [
+                            {
+                                "type": "plain_text",
+                                "text": ":thumbsup: Acknowledge this message and response directly to the inbound request.",
+                                "emoji": True,
+                            },
+                            {
+                                "type": "plain_text",
+                                "text": ":thumbsdown: Recategorize this message, and if defined, I will route it to the appropriate on-call. If none applies, select Other and pick a channel that I will route the user to.",
+                                "emoji": True,
+                            },
+                        ],
+                    },
+                    {
+                        "type": "actions",
+                        "elements": [
+                            {
+                                "type": "button",
+                                "text": {
+                                    "type": "plain_text",
+                                    "emoji": True,
+                                    "text": "Acknowledge",
+                                },
+                                "style": "primary",
+                                "value": "Privacy",
+                                "action_id": "acknowledge_submit_action",
+                            },
+                            {
+                                "type": "button",
+                                "text": {
+                                    "type": "plain_text",
+                                    "emoji": True,
+                                    "text": "Inaccurate, recategorize",
+                                },
+                                "style": "danger",
+                                "value": "recategorize",
+                                "action_id": "recategorize_submit_action",
+                            },
+                        ],
+                    },
+                    {
+                        "type": "section",
+                        "block_id": "recategorize_select_category_block",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": "*Select a category from the dropdown list, or*",
+                        },
+                        "accessory": {
+                            "type": "static_select",
+                            "placeholder": {
+                                "type": "plain_text",
+                                "text": "Select an item",
+                                "emoji": True,
+                            },
+                            "options": [
+                                {
+                                    "text": {
+                                        "type": "plain_text",
+                                        "text": "Physical Security",
+                                        "emoji": True,
+                                    },
+                                    "value": "physical_security",
+                                },
+                                {
+                                    "text": {
+                                        "type": "plain_text",
+                                        "text": "Other",
+                                        "emoji": True,
+                                    },
+                                    "value": "other",
+                                },
+                            ],
+                            "action_id": "recategorize_select_category_action",
+                        },
+                    },
+                ],
+                metadata={
+                    "event_type": "notify_oncall",
+                    "event_payload": {
+                        "inbound_message_channel": "C12345",
+                        "inbound_message_ts": "t0",
+                        "feed_message_channel": "C23456",
+                        "feed_message_ts": "t1",
+                        "inbound_message_url": "https://myorg.slack.com/archives/C12345/p1234567890",
+                        "predicted_category": "privacy",
+                    },
+                },
+                text="Notify on-call for new inbound request",
+            ),
+        ]
+    )
+
+
+async def test_inbound_request_recategorize_to_other_category_handler(
+    mock_slack_client,
+    mock_appsec_oncall_recategorize_to_other_message,
+):
+    handler = InboundRequestRecategorizeHandler(mock_slack_client)
+    await handler.maybe_handle(mock_appsec_oncall_recategorize_to_other_message)
+    mock_slack_client._client.assert_has_calls(
+        [
+            call.reactions_add(
+                blocks=[],
+                channel="C34567",
+                ts="t3",
+                text=":thumbsdown: <@U1234567890> reassigned the <https://myorg.slack.com/archives/C12345/p1234567890|inbound message> from Application Security to: Other.",
+            ),
+            call.reactions_add(channel="C23456", name="thumbsdown", timestamp="t1"),
+            call.chat_postMessage(
+                blocks=[],
+                channel="C23456",
+                thread_ts="t1",
+                text=":thumbsdown: <@U1234567890> reassigned the inbound message from Application Security to: Other.",
+            ),
+            call.chat_postMessage(
+                channel="C12345",
+                thread_ts="t0",
+                text="Hi, thanks for reaching out! Our team looked at your request, and this is actually something that we don't own. We recommend reaching out to <#C11111> instead.",
+                blocks=[
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": "Hi, thanks for reaching out! Our team looked at your request, and this is actually something that we don't own. We recommend reaching out to <#C11111> instead.",
+                        },
+                    },
+                    {
+                        "type": "context",
+                        "elements": [
+                            {
+                                "type": "plain_text",
+                                "text": "If you feel strongly this is a Security issue, respond to this thread and someone from our team will get back to you.",
+                                "emoji": True,
+                            }
+                        ],
+                    },
+                ],
+            ),
+            call.chat_getPermalink(channel="", message_ts=""),
+            call.chat_postMessage(
+                channel="C23456",
+                thread_ts="t1",
+                text="<mockpermalink|Autoresponded> to inbound request.",
+            ),
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    "event_args_override",
+    [
+        # Channel is not inbound request channel
+        {"channel": "c0"},
+        # No text
+        {"text": ""},
+        # Bot message
+        {"subtype": "bot_message"},
+        # Thread response, not broadcasted
+        {"thread_ts": "t0"},
+    ],
+)
+@patch.object(openai, "ChatCompletion")
+async def test_inbound_request_handler_skip_handle(
+    mock_chat_completion, event_args_override, mock_slack_client, mock_inbound_request
+):
+    mock_inbound_request.event = {**mock_inbound_request.event, **event_args_override}
+    handler = InboundRequestHandler(mock_slack_client)
+
+    await handler.maybe_handle(mock_inbound_request)
+    mock_chat_completion.create.assert_not_called()
+
+
+================================================
+File: /bots/triage-slackbot/tests/test_config.toml
+================================================
+# Organization ID associated with OpenAI API key.
+openai_organization_id = "org-1234"
+
+# Prompt to use for categorizing inbound requests.
+openai_prompt = """
+You are currently an on-call engineer for a security team at a tech company. 
+Your goal is to triage the following incoming Slack message into three categories:
+1. Privacy, return "privacy"
+2. Application security, return "appsec"
+3. Physical security, return "physical_security"
+"""
+inbound_request_channel_id = "C12345"
+feed_channel_id = "C23456"
+other_category_enabled = true
+
+[[ categories ]] 
+key = "appsec"
+display_name = "Application Security"
+oncall_slack_id = "C34567"
+autorespond = false
+
+[[ categories ]] 
+key = "privacy"
+display_name = "Privacy"
+oncall_slack_id = "U12345"
+autorespond = false
+
+[[ categories ]] 
+key = "physical_security"
+display_name = "Physical Security"
+autorespond = true
+autorespond_message = "Looking for Physical or Office Security? You can reach out to physical-security@company.com."
+
+================================================
+File: /bots/triage-slackbot/pyproject.template.toml
+================================================
+[project]
+name = "openai-triage-slackbot"
+requires-python = ">=3.8"
+version = "1.0.0"
+dependencies = [
+    "toml",
+    "openai_slackbot @ file://$REPO_ROOT/shared/openai-slackbot",
+]
+
+[build-system]
+requires = ["setuptools>=64.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+env = [
+  "SLACK_BOT_TOKEN=mock-token",
+  "SOCKET_APP_TOKEN=mock-token",
+  "OPENAI_API_KEY=mock-key",
+]
+
+================================================
+File: /bots/triage-slackbot/triage_slackbot/handlers.py
+================================================
+import typing as t
+from enum import Enum
+from logging import getLogger
+
+from openai_slackbot.clients.slack import CreateSlackMessageResponse, SlackClient
+from openai_slackbot.handlers import BaseActionHandler, BaseHandler, BaseMessageHandler
+from openai_slackbot.utils.slack import (
+    RenderedSlackBlock,
+    block_id_exists,
+    extract_text_from_event,
+    get_block_by_id,
+    remove_block_id_if_exists,
+    render_slack_id_to_mention,
+    render_slack_url,
+)
+from triage_slackbot.category import RequestCategory
+from triage_slackbot.config import get_config
+from triage_slackbot.openai_utils import get_predicted_category
+
+logger = getLogger(__name__)
+
+
+class BlockId(str, Enum):
+    # Block that will be rendered if on-call recagorizes inbound request but doesn't select a new category.
+    empty_category_warning = "empty_category_warning_block"
+
+    # Block that will be rendreed if on-call recategorizes inbound request to "Other" but doesn't select a conversation.
+    empty_conversation_warning = "empty_conversation_warning_block"
+
+    # Block that will be rendered to show on-call all the remaining categories to route to.
+    recategorize_select_category = "recategorize_select_category_block"
+
+    # Block that will be rendered to show on-call all the conversations they can reroute the user
+    # to, if they select "Other" as the category.
+    recategorize_select_conversation = "recategorize_select_conversation_block"
+
+
+class MessageTemplatePath(str, Enum):
+    # Template for feed channel message that summarizes triage updates.
+    feed = "messages/feed.j2"
+
+    # Template for message that notifies oncall about inbound request in the same channel as the feed channel.
+    notify_oncall_in_feed = "messages/notify_oncall_in_feed.j2"
+
+    # Template for message that notifies oncall about inbound request in a different channel from the feed channel.
+    notify_oncall_channel = "messages/notify_oncall_channel.j2"
+
+    # Template for message that will autorespond to inbound requests.
+    autorespond = "messages/autorespond.j2"
+
+
+BlockIdToTemplatePath: t.Dict[BlockId, str] = {
+    BlockId.empty_category_warning: "blocks/empty_category_warning.j2",
+    BlockId.empty_conversation_warning: "blocks/empty_conversation_warning.j2",
+    BlockId.recategorize_select_conversation: "blocks/select_conversation.j2",
+}
+
+
+class InboundRequestHandlerMixin(BaseHandler):
+    def __init__(self, slack_client: SlackClient) -> None:
+        super().__init__(slack_client)
+        self.config = get_config()
+
+    def render_block_if_not_exists(
+        self, *, block_id: BlockId, blocks: t.List[RenderedSlackBlock]
+    ) -> t.List[RenderedSlackBlock]:
+        if not block_id_exists(blocks, block_id):
+            template_path = BlockIdToTemplatePath[block_id]
+            block = self._slack_client.render_blocks_from_template(template_path)
+            blocks.append(block)
+        return blocks
+
+    def get_selected_category(self, body: t.Dict[str, t.Any]) -> t.Optional[RequestCategory]:
+        category = (
+            body["state"]
+            .get("values", {})
+            .get(BlockId.recategorize_select_category, {})
+            .get("recategorize_select_category_action", {})
+            .get("selected_option", {})
+            or {}
+        ).get("value")
+
+        if not category:
+            return None
+
+        return self.config.categories[category]
+
+    def get_selected_conversation(self, body: t.Dict[str, t.Any]) -> t.Optional[str]:
+        return (
+            body["state"]
+            .get("values", {})
+            .get(BlockId.recategorize_select_conversation, {})
+            .get("recategorize_select_conversation_action", {})
+            .get("selected_conversation")
+        )
+
+    async def notify_oncall(
+        self,
+        *,
+        predicted_category: RequestCategory,
+        selected_conversation: t.Optional[str],
+        remaining_categories: t.List[RequestCategory],
+        inbound_message_channel: str,
+        inbound_message_ts: str,
+        feed_message_channel: str,
+        feed_message_ts: str,
+        inbound_message_url: str,
+    ) -> None:
+        autoresponded = await self._maybe_autorespond(
+            predicted_category,
+            selected_conversation,
+            inbound_message_channel,
+            inbound_message_ts,
+            feed_message_channel,
+            feed_message_ts,
+        )
+
+        if autoresponded:
+            logger.info(f"Autoresponded to inbound request: {inbound_message_url}")
+            return
+
+        # This metadata will continue to be passed along to the subsequent
+        # notify on-call messages.
+        metadata = {
+            "event_type": "notify_oncall",
+            "event_payload": {
+                "inbound_message_channel": inbound_message_channel,
+                "inbound_message_ts": inbound_message_ts,
+                "feed_message_channel": feed_message_channel,
+                "feed_message_ts": feed_message_ts,
+                "inbound_message_url": inbound_message_url,
+                "predicted_category": predicted_category.key,
+            },
+        }
+
+        block_args = {
+            "predicted_category": predicted_category,
+            "remaining_categories": remaining_categories,
+            "inbound_message_channel": inbound_message_channel,
+        }
+
+        if predicted_category.route_to_channel:
+            channel = predicted_category.oncall_slack_id
+            thread_ts = None  # This will be a new message, not a thread.
+            blocks = await self._get_notify_oncall_channel_blocks(
+                **block_args,
+                inbound_message_url=inbound_message_url,
+            )
+        else:
+            channel = feed_message_channel
+            thread_ts = feed_message_ts  # Post this as a thread reply to the original feed message.
+            blocks = await self._get_notify_oncall_in_feed_blocks(**block_args)
+
+        await self._slack_client.post_message(
+            channel=channel,
+            thread_ts=thread_ts,
+            blocks=blocks,
+            metadata=metadata,
+            text="Notify on-call for new inbound request",
+        )
+
+    async def _get_notify_oncall_in_feed_blocks(
+        self,
+        *,
+        predicted_category: RequestCategory,
+        remaining_categories: t.List[RequestCategory],
+        inbound_message_channel: str,
+    ):
+        oncall_mention = self._get_oncall_mention(predicted_category)
+        predicted_category_display_name = predicted_category.display_name
+        oncall_greeting = (
+            f":wave: Hi {oncall_mention}"
+            if oncall_mention
+            else f"No on-call defined for {predicted_category_display_name}"
+        )
+
+        return self._slack_client.render_blocks_from_template(
+            MessageTemplatePath.notify_oncall_in_feed.value,
+            {
+                "predicted_category": predicted_category_display_name,
+                "oncall_greeting": oncall_greeting,
+                "options": RequestCategory.to_block_options(remaining_categories),
+                "inbound_message_channel": inbound_message_channel,
+            },
+        )
+
+    async def _get_notify_oncall_channel_blocks(
+        self,
+        *,
+        predicted_category: RequestCategory,
+        remaining_categories: t.List[RequestCategory],
+        inbound_message_channel: str,
+        inbound_message_url: str,
+    ):
+        return self._slack_client.render_blocks_from_template(
+            MessageTemplatePath.notify_oncall_channel.value,
+            {
+                "inbound_message_url": inbound_message_url,
+                "inbound_message_channel": inbound_message_channel,
+                "predicted_category": predicted_category.display_name,
+                "options": RequestCategory.to_block_options(remaining_categories),
+            },
+        )
+
+    def _get_oncall_mention(self, predicted_category: RequestCategory) -> t.Optional[str]:
+        oncall_slack_id = predicted_category.oncall_slack_id
+        return render_slack_id_to_mention(oncall_slack_id) if oncall_slack_id else None
+
+    async def _maybe_autorespond(
+        self,
+        predicted_category: RequestCategory,
+        selected_conversation: t.Optional[str],
+        inbound_message_channel: str,
+        inbound_message_ts: str,
+        feed_message_channel: str,
+        feed_message_ts: str,
+    ) -> bool:
+        if not predicted_category.autorespond:
+            return False
+
+        text = "Hi, thanks for reaching out!"
+        if predicted_category.autorespond_message:
+            rendered_selected_conversation = (
+                render_slack_id_to_mention(selected_conversation) if selected_conversation else None
+            )
+            text += (
+                f" {predicted_category.autorespond_message.format(rendered_selected_conversation)}"
+            )
+
+        blocks = self._slack_client.render_blocks_from_template(
+            MessageTemplatePath.autorespond.value, {"text": text}
+        )
+        message = await self._slack_client.post_message(
+            channel=inbound_message_channel,
+            thread_ts=inbound_message_ts,
+            text=text,
+            blocks=blocks,
+        )
+        message_link = await self._slack_client.get_message_link(
+            channel=message.channel, message_ts=message.ts
+        )
+
+        # Post an update to the feed channel.
+        feed_message = (
+            f"{render_slack_url(url=message_link, text='Autoresponded')} to inbound request."
+        )
+        await self._slack_client.post_message(
+            channel=feed_message_channel, thread_ts=feed_message_ts, text=feed_message
+        )
+
+        return True
+
+
+class InboundRequestHandler(BaseMessageHandler, InboundRequestHandlerMixin):
+    """
+    Handles inbound requests in inbound request channel.
+    """
+
+    async def handle(self, args):
+        event = args.event
+
+        channel = event.get("channel")
+        ts = event.get("ts")
+
+        logging_extra = self.logging_extra(args)
+
+        text = extract_text_from_event(event)
+        if not text:
+            logger.info("No text in event, done processing", extra=logging_extra)
+            return
+
+        predicted_category = await self._predict_category(text)
+        logger.info(f"Predicted category: {predicted_category}", extra=logging_extra)
+
+        message_link = await self._slack_client.get_message_link(channel=channel, message_ts=ts)
+        feed_message = await self._update_feed(
+            predicted_category=predicted_category,
+            message_channel=channel,
+            message_link=message_link,
+        )
+        logger.info(
+            f"Updated feed channel for inbound message link: {message_link}",
+            extra=logging_extra,
+        )
+
+        remaining_categories = [
+            r for r in self.config.categories.values() if r != predicted_category
+        ]
+        await self.notify_oncall(
+            predicted_category=predicted_category,
+            selected_conversation=None,
+            remaining_categories=remaining_categories,
+            inbound_message_channel=channel,
+            inbound_message_ts=ts,
+            feed_message_channel=feed_message.channel,
+            feed_message_ts=feed_message.ts,
+            inbound_message_url=message_link,
+        )
+        logger.info("Notified on-call", extra=logging_extra)
+
+    async def should_handle(self, args):
+        event = args.event
+
+        return (
+            event["channel"] == self.config.inbound_request_channel_id
+            and
+            # Don't respond to messages in threads (with the exception of thread replies
+            # that are also sent to the channel)
+            (
+                (
+                    event.get("thread_ts") is None
+                    and (not event.get("subtype") or event.get("subtype") == "file_share")
+                )
+                or event.get("subtype") == "thread_broadcast"
+            )
+        )
+
+    async def _predict_category(self, body) -> RequestCategory:
+        predicted_category = await get_predicted_category(body)
+        return self.config.categories[predicted_category]
+
+    async def _update_feed(
+        self,
+        *,
+        predicted_category: RequestCategory,
+        message_channel: str,
+        message_link: str,
+    ) -> CreateSlackMessageResponse:
+        oncall_mention = self._get_oncall_mention(predicted_category) or "No on-call assigned"
+        blocks = self._slack_client.render_blocks_from_template(
+            MessageTemplatePath.feed.value,
+            {
+                "predicted_category": predicted_category.display_name,
+                "inbound_message_channel": message_channel,
+                "inbound_message_url": message_link,
+                "oncall_mention": oncall_mention,
+            },
+        )
+
+        message = await self._slack_client.post_message(
+            channel=self.config.feed_channel_id,
+            blocks=blocks,
+            text="New inbound request received",
+        )
+        return message
+
+
+class InboundRequestAcknowledgeHandler(BaseActionHandler, InboundRequestHandlerMixin):
+    """
+    Once InboundRequestHandler has predicted the category of an inbound request
+    and notifies the corresponding on-call, this handler will be called if on-call
+    acknowledges the prediction, i.e. they think the prediction is accurate.
+    """
+
+    @property
+    def action_id(self):
+        return "acknowledge_submit_action"
+
+    async def handle(self, args):
+        body = args.body
+
+        notify_oncall_msg = body["container"]
+        notify_oncall_msg_ts = notify_oncall_msg["message_ts"]
+        notify_oncall_msg_channel = notify_oncall_msg["channel_id"]
+
+        feed_message_metadata = body["message"].get("metadata", {}).get("event_payload", {})
+        feed_message_ts = feed_message_metadata["feed_message_ts"]
+        feed_message_channel = feed_message_metadata["feed_message_channel"]
+        inbound_message_url = feed_message_metadata["inbound_message_url"]
+        predicted_category = feed_message_metadata["predicted_category"]
+
+        # Oncall that was notified.
+        user = body["user"]
+
+        await self._slack_client.update_message(
+            blocks=[],
+            channel=notify_oncall_msg_channel,
+            ts=notify_oncall_msg_ts,
+            # If oncall is notified in the feed channel, don't need to include
+            # the inbound message URL since oncall will be notified in the feed
+            # message thread, and the URL is already in the original message.
+            text=self._get_message(
+                user=user,
+                category=predicted_category,
+                inbound_message_url=inbound_message_url,
+                with_url=notify_oncall_msg_channel != feed_message_channel,
+            ),
+        )
+
+        # If oncall gets notified in a separate channel and not the feed channel,
+        # update the feed thread with the acknowledgment.
+        if notify_oncall_msg_channel != feed_message_channel:
+            await self._slack_client.post_message(
+                blocks=[],
+                channel=feed_message_channel,
+                thread_ts=feed_message_ts,
+                text=self._get_message(
+                    user=user,
+                    category=predicted_category,
+                    inbound_message_url=inbound_message_url,
+                    with_url=False,
+                ),
+            )
+
+        feed_message = await self._slack_client.get_message(
+            channel=feed_message_channel, ts=feed_message_ts
+        )
+        if feed_message:
+            # If the original message has been thumbs-downed, this means
+            # that the bot's original prediction is wrong, so don't thumbs
+            # up the feed message.
+            wrong_original_prediction = any(
+                [r["name"] == "-1" for r in feed_message.get("reactions", [])]
+            )
+
+            if not wrong_original_prediction:
+                await self._slack_client.add_reaction(
+                    channel=feed_message_channel,
+                    name="thumbsup",
+                    timestamp=feed_message_ts,
+                )
+
+    def _get_message(
+        self, user: t.Dict, category: str, inbound_message_url: str, with_url: bool
+    ) -> str:
+        message = f":thumbsup: {render_slack_id_to_mention(user['id'])} acknowledged the "
+        if with_url:
+            message += render_slack_url(url=inbound_message_url, text="inbound message")
+        else:
+            message += "inbound message"
+
+        return f"{message} triaged to {self.config.categories[category].display_name}."
+
+
+class InboundRequestRecategorizeHandler(BaseActionHandler, InboundRequestHandlerMixin):
+    """
+    This handler will be called if on-call wants to recategorize the request
+    that they get notified about.
+    """
+
+    @property
+    def action_id(self):
+        return "recategorize_submit_action"
+
+    async def handle(self, args):
+        body = args.body
+
+        notify_oncall_msg = body["container"]
+        notify_oncall_msg_ts = notify_oncall_msg["message_ts"]
+        notify_oncall_msg_channel = notify_oncall_msg["channel_id"]
+
+        msg_metadata = body["message"].get("metadata", {}).get("event_payload", {})
+        feed_message_ts = msg_metadata["feed_message_ts"]
+        feed_message_channel = msg_metadata["feed_message_channel"]
+        inbound_message_url = msg_metadata["inbound_message_url"]
+
+        # Predicted category that turned out to be incorrect
+        # and wanted to be recategorized.
+        predicted_category = self.config.categories[msg_metadata.pop("predicted_category")]
+        assert predicted_category
+
+        user: t.Dict = body["user"]
+
+        notify_oncall_msg_blocks = body["message"]["blocks"]
+        selection_block = get_block_by_id(
+            notify_oncall_msg_blocks, BlockId.recategorize_select_category
+        )
+        remaining_category_keys: t.List[str] = [
+            o["value"] for o in selection_block["accessory"]["options"]
+        ]
+
+        selected_category: t.Optional[RequestCategory] = self.get_selected_category(body)
+        selected_conversation: t.Optional[str] = self.get_selected_conversation(body)
+        valid, notify_oncall_msg_blocks = await self._validate_selection(
+            selected_category, selected_conversation, notify_oncall_msg_blocks
+        )
+        if valid:
+            assert selected_category, "selected_category should be set if valid"
+            message_kwargs = {
+                "user": user,
+                "predicted_category": predicted_category,
+                "selected_category": selected_category,
+                "selected_conversation": selected_conversation,
+                "inbound_message_url": inbound_message_url,
+            }
+
+            await self._slack_client.update_message(
+                blocks=[],
+                channel=notify_oncall_msg_channel,
+                ts=notify_oncall_msg_ts,
+                # If the feed message is in the same channel as the notify on-call message, don't need to include
+                # the URL since it's already in the original feed message.
+                text=self._get_message(
+                    **message_kwargs,
+                    with_url=notify_oncall_msg_channel != feed_message_channel,
+                ),
+            )
+
+            # Indicate that the previous predicted category is not accurate.
+            await self._slack_client.add_reaction(
+                channel=feed_message_channel,
+                name="thumbsdown",
+                timestamp=feed_message_ts,
+            )
+
+            # If the feed message is in a different channel than the notify on-call message,
+            # post recategorization update to the feed channel.
+            if notify_oncall_msg_channel != feed_message_channel:
+                await self._slack_client.post_message(
+                    blocks=[],
+                    channel=feed_message_channel,
+                    thread_ts=feed_message_ts,
+                    text=self._get_message(**message_kwargs, with_url=False),
+                )
+
+            remaining_categories = [
+                self.config.categories[category_key]
+                for category_key in remaining_category_keys
+                if category_key != selected_category.key
+            ]
+
+            # Route this to the next oncall.
+            await self.notify_oncall(
+                predicted_category=selected_category,
+                selected_conversation=selected_conversation,
+                remaining_categories=remaining_categories,
+                **msg_metadata,
+            )
+        else:
+            # Display warning.
+            await self._slack_client.update_message(
+                blocks=notify_oncall_msg_blocks,
+                channel=notify_oncall_msg_channel,
+                ts=notify_oncall_msg_ts,
+                text="",
+            )
+
+    def _get_message(
+        self,
+        *,
+        user: t.Dict,
+        predicted_category: RequestCategory,
+        selected_category: RequestCategory,
+        selected_conversation: t.Optional[str],
+        inbound_message_url: str,
+        with_url: bool,
+    ) -> str:
+        rendered_selected_conversation = (
+            render_slack_id_to_mention(selected_conversation) if selected_conversation else None
+        )
+        selected_category_display_name = selected_category.display_name.format(
+            rendered_selected_conversation
+        )
+
+        message_text = f"<{inbound_message_url}|inbound message>" if with_url else "inbound message"
+        return f":thumbsdown: {render_slack_id_to_mention(user['id'])} reassigned the {message_text} from {predicted_category.display_name} to: {selected_category_display_name}."
+
+    async def _validate_selection(
+        self,
+        selected_category: t.Optional[RequestCategory],
+        selected_conversation: t.Optional[str],
+        blocks: t.List[RenderedSlackBlock],
+    ) -> t.Tuple[bool, t.List[RenderedSlackBlock]]:
+        if not selected_category:
+            return False, self.render_block_if_not_exists(
+                block_id=BlockId.empty_category_warning, blocks=blocks
+            )
+        elif selected_category.is_other() and not selected_conversation:
+            return False, self.render_block_if_not_exists(
+                block_id=BlockId.empty_conversation_warning, blocks=blocks
+            )
+
+        return True, blocks
+
+
+class InboundRequestRecategorizeSelectHandler(BaseActionHandler, InboundRequestHandlerMixin):
+    """
+    This handler will be called if on-call selects a new category for a request they
+    get notififed about.
+    """
+
+    @property
+    def action_id(self):
+        return "recategorize_select_category_action"
+
+    async def handle(self, args):
+        body = args.body
+
+        notify_oncall_msg = body["container"]
+        notify_oncall_msg_ts = notify_oncall_msg["message_ts"]
+        notify_oncall_msg_channel = notify_oncall_msg["channel_id"]
+
+        notify_oncall_msg_blocks = body["message"]["blocks"]
+        notify_oncall_msg_blocks = remove_block_id_if_exists(
+            notify_oncall_msg_blocks, BlockId.empty_category_warning
+        )
+
+        selected_category = self.get_selected_category(body)
+        if selected_category.is_other():
+            # Prompt on-call to select a conversation if Other category is selected.
+            notify_oncall_msg_blocks = self.render_block_if_not_exists(
+                block_id=BlockId.recategorize_select_conversation,
+                blocks=notify_oncall_msg_blocks,
+            )
+        else:
+            # Remove warning if on-call updates their selection from Other to non-Other.
+            notify_oncall_msg_blocks = remove_block_id_if_exists(
+                notify_oncall_msg_blocks, BlockId.recategorize_select_conversation
+            )
+
+        # Update message with warnings, if any.
+        await self._slack_client.update_message(
+            blocks=notify_oncall_msg_blocks,
+            channel=notify_oncall_msg_channel,
+            ts=notify_oncall_msg_ts,
+        )
+
+
+class InboundRequestRecategorizeSelectConversationHandler(BaseActionHandler):
+    """
+    This handler will be called if on-call selects a conversation to route the request to.
+    """
+
+    @property
+    def action_id(self):
+        return "recategorize_select_conversation_action"
+
+    async def handle(self, args):
+        pass
+
+
+================================================
+File: /bots/triage-slackbot/triage_slackbot/config.py
+================================================
+import os
+import typing as t
+
+import toml
+from dotenv import load_dotenv
+from pydantic import BaseModel, ValidationError, field_validator, model_validator
+from pydantic.functional_validators import AfterValidator, BeforeValidator
+from triage_slackbot.category import OTHER_KEY, RequestCategory
+
+_CONFIG = None
+
+
+def convert_categories(v: t.List[t.Dict]):
+    categories = {}
+
+    for category in v:
+        categories[category["key"]] = category
+    return categories
+
+
+def validate_channel(channel_id: str) -> str:
+    if not channel_id.startswith("C"):
+        raise ValueError("channel ID must start with 'C'")
+    return channel_id
+
+
+class Config(BaseModel):
+    # OpenAI organization ID associated with OpenAI API key.
+    openai_organization_id: str
+
+    # OpenAI prompt to categorize the request.
+    openai_prompt: str
+
+    # Slack channel where inbound requests are received.
+    inbound_request_channel_id: t.Annotated[str, AfterValidator(validate_channel)]
+
+    # Slack channel where triage updates are posted.
+    feed_channel_id: t.Annotated[str, AfterValidator(validate_channel)]
+
+    # Valid categories for inbound requests to be triaged into.
+    categories: t.Annotated[t.Dict[str, RequestCategory], BeforeValidator(convert_categories)]
+
+    # Enables "Other" category, which will allow triager to
+    # route the request to a specific conversation.
+    other_category_enabled: bool
+
+    @model_validator(mode="after")
+    def check_category_keys(config: "Config") -> "Config":
+        if config.other_category_enabled:
+            if OTHER_KEY in config.categories:
+                raise ValidationError("other category is reserved and cannot be used")
+
+        category_keys = set(config.categories.keys())
+        if len(category_keys) != len(config.categories):
+            raise ValidationError("category keys must be unique")
+
+        return config
+
+
+def load_config(path: str):
+    load_dotenv()
+
+    with open(path) as f:
+        cfg = toml.loads(f.read())
+        config = Config(**cfg)
+
+        if config.other_category_enabled:
+            other_category = RequestCategory(
+                key=OTHER_KEY,
+                display_name=OTHER_KEY.capitalize(),
+                oncall_slack_id=None,
+                autorespond=True,
+                autorespond_message="Our team looked at your request, and this is actually something that we don't own. We recommend reaching out to {} instead.",
+            )
+            config.categories[other_category.key] = other_category
+
+    global _CONFIG
+    _CONFIG = config
+    return _CONFIG
+
+
+def get_config() -> Config:
+    global _CONFIG
+    if _CONFIG is None:
+        raise Exception("config not initialized, call load_config() first")
+    return _CONFIG
+
+
+================================================
+File: /bots/triage-slackbot/triage_slackbot/openai_utils.py
+================================================
+import json
+from functools import cache
+
+import openai
+from triage_slackbot.category import OTHER_KEY, RequestCategory
+from triage_slackbot.config import get_config
+
+
+@cache
+def predict_category_functions(categories: list[RequestCategory]) -> list[dict]:
+    return [
+        {
+            "name": "get_predicted_category",
+            "description": "Predicts the category of an inbound request.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "enum": [
+                            category.key for category in categories if category.key != OTHER_KEY
+                        ],
+                        "description": "Predicted category of the inbound request",
+                    },
+                },
+                "required": ["category"],
+            },
+        }
+    ]
+
+
+async def get_predicted_category(inbound_request_content: str) -> str:
+    """
+    This function uses the OpenAI Chat Completion API to predict the category of an inbound request.
+    """
+    config = get_config()
+
+    # Define the prompt
+    messages = [
+        {"role": "system", "content": config.openai_prompt},
+        {"role": "user", "content": inbound_request_content},
+    ]
+
+    # Call the API
+    response = openai.chat.completions.create(
+        model="gpt-4-32k",
+        messages=messages,
+        temperature=0,
+        stream=False,
+        functions=predict_category_functions(config.categories.values()),
+        function_call={"name": "get_predicted_category"},
+    )
+
+    function_args = json.loads(response.choices[0].message.function_call.arguments)  # type: ignore
+    return function_args["category"]
+
+
+================================================
+File: /bots/triage-slackbot/triage_slackbot/.env.template
+================================================
+SLACK_BOT_TOKEN=xoxb- # Go to your Slack app, Settings > Install App > Bot User OAuth Token
+SOCKET_APP_TOKEN=xapp-  # Go to your Slack app, Settings > Basic Information > App-Level Tokens
+OPENAI_API_KEY=
+
+================================================
+File: /bots/triage-slackbot/triage_slackbot/config.toml
+================================================
+# Organization ID associated with OpenAI API key.
+openai_organization_id = "<replace me>"
+
+# Prompt to use for categorizing inbound requests.
+openai_prompt = """
+You are currently an on-call engineer for a security team at a tech company. 
+Your goal is to triage the following incoming Slack message into three categories: 
+1. Privacy, return "privacy"
+2. Application security, return "appsec"
+3. Physical security, return "physical_security"
+"""
+inbound_request_channel_id = "<replace me>"
+feed_channel_id = "<replace me>"
+other_category_enabled = true
+
+[[ categories ]] 
+key = "appsec"
+display_name = "Application Security"
+oncall_slack_id = "<replace me>"
+autorespond = false
+
+[[ categories ]] 
+key = "privacy"
+display_name = "Privacy"
+oncall_slack_id = "<replace me>"
+autorespond = false
+
+[[ categories ]] 
+key = "physical_security"
+display_name = "Physical Security"
+autorespond = true
+autorespond_message = "Looking for Physical or Office Security? You can reach out to physical-security@company.com."
+
+
+================================================
+File: /bots/triage-slackbot/triage_slackbot/category.py
+================================================
+import typing as t
+
+from pydantic import BaseModel, ValidationError, model_validator
+
+OTHER_KEY = "other"
+
+
+class RequestCategory(BaseModel):
+    # Key used to identify the category in the config.
+    key: str
+
+    # Display name of the category.
+    display_name: str
+
+    # Slack ID of the user or channel to route the request to.
+    # If user is specified, user will be tagged on the message
+    # in the feed channel.
+    oncall_slack_id: t.Optional[str] = None
+
+    # If true, no manual triage is required for this category
+    # and that the bot will autorespond to the inbound request.
+    autorespond: bool = False
+
+    # Message to send when autoresponding to the inbound request.
+    autorespond_message: t.Optional[str] = None
+
+    @model_validator(mode="after")
+    def check_autorespond(self) -> "RequestCategory":
+        if self.autorespond and not self.autorespond_message:
+            raise ValidationError("autorespond_message must be set if autorespond is True")
+        return self
+
+    @property
+    def route_to_channel(self) -> bool:
+        return (self.oncall_slack_id or "").startswith("C")
+
+    @classmethod
+    def to_block_options(cls, categories: t.List["RequestCategory"]) -> t.Dict[str, str]:
+        return dict((c.key, c.display_name) for c in categories)
+
+    def is_other(self) -> bool:
+        return self.key == OTHER_KEY
+
+
+================================================
+File: /bots/triage-slackbot/triage_slackbot/bot.py
+================================================
+import asyncio
+import os
+
+from openai_slackbot.bot import start_bot
+from triage_slackbot.config import get_config, load_config
+from triage_slackbot.handlers import (
+    InboundRequestAcknowledgeHandler,
+    InboundRequestHandler,
+    InboundRequestRecategorizeHandler,
+    InboundRequestRecategorizeSelectConversationHandler,
+    InboundRequestRecategorizeSelectHandler,
+)
+
+if __name__ == "__main__":
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    load_config(os.path.join(current_dir, "config.toml"))
+
+    message_handler = InboundRequestHandler
+    action_handlers = [
+        InboundRequestAcknowledgeHandler,
+        InboundRequestRecategorizeHandler,
+        InboundRequestRecategorizeSelectHandler,
+        InboundRequestRecategorizeSelectConversationHandler,
+    ]
+
+    template_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+
+    config = get_config()
+    asyncio.run(
+        start_bot(
+            openai_organization_id=config.openai_organization_id,
+            slack_message_handler=message_handler,
+            slack_action_handlers=action_handlers,
+            slack_template_path=template_path,
+        )
+    )
+
+
+================================================
+File: /bots/triage-slackbot/triage_slackbot/templates/messages/notify_oncall_in_feed.j2
+================================================
+[
+	{
+		"type": "section",
+		"text": {
+			"type": "mrkdwn",
+			"text": "{{ oncall_greeting }}, is this assignment accurate?\n\n"
+		}
+	},
+	{% include 'messages/_notify_oncall_body.j2' %}
+]
+
+
+================================================
+File: /bots/triage-slackbot/triage_slackbot/templates/messages/_notify_oncall_body.j2
+================================================
+{
+	"type": "context",
+	"elements": [
+		{
+			"type": "plain_text",
+			"text": ":thumbsup: Acknowledge this message and response directly to the inbound request.",
+			"emoji": true
+		},
+		{
+			"type": "plain_text",
+			"text": ":thumbsdown: Recategorize this message, and if defined, I will route it to the appropriate on-call. If none applies, select Other and pick a channel that I will route the user to.",
+			"emoji": true
+		}
+	]
+},
+{
+	"type": "actions",
+	"elements": [
+		{
+			"type": "button",
+			"text": {
+				"type": "plain_text",
+				"emoji": true,
+				"text": "Acknowledge"
+			},
+			"style": "primary",
+			"value": "{{ predicted_category }}",
+			"action_id": "acknowledge_submit_action"
+		},
+		{
+			"type": "button",
+			"text": {
+				"type": "plain_text",
+				"emoji": true,
+				"text": "Inaccurate, recategorize"
+			},
+			"style": "danger",
+			"value": "recategorize",
+			"action_id": "recategorize_submit_action"
+		}
+	]
+},
+{
+	"type": "section",
+	"block_id": "recategorize_select_category_block",
+	"text": {
+		"type": "mrkdwn",
+		"text": "*Select a category from the dropdown list, or*"
+	},
+	"accessory": {
+		"type": "static_select",
+		"placeholder": {
+			"type": "plain_text",
+			"text": "Select an item",
+			"emoji": true
+		},
+		"options": [
+			{% for value, text in options.items() %}
+			{
+				"text": {
+					"type": "plain_text",
+					"text": "{{ text }}",
+					"emoji": true
+				},
+				"value": "{{ value }}"
+			}{% if not loop.last %},{% endif %}
+			{% endfor %}
+		],
+		"action_id": "recategorize_select_category_action"
+	}
+}
+
+
+================================================
+File: /bots/triage-slackbot/triage_slackbot/templates/messages/autorespond.j2
+================================================
+[
+    {
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": "{{ text }}"
+        }
+    },
+    {
+        "type": "context",
+        "elements": [
+            {
+                "type": "plain_text",
+                "text": "If you feel strongly this is a Security issue, respond to this thread and someone from our team will get back to you.",
+                "emoji": true
+            }
+        ]
+    }
+]
+
+
+================================================
+File: /bots/triage-slackbot/triage_slackbot/templates/messages/notify_oncall_channel.j2
+================================================
+[
+	{
+		"type": "section",
+		"text": {
+			"type": "mrkdwn",
+			"text": ":wave: Hi, we received an <{{ inbound_message_url }}|inbound message> in <#{{ inbound_message_channel }}>, which was categorized as {{ predicted_category }}. Is this accurate?\n\n"
+		}
+	},
+	{% include 'messages/_notify_oncall_body.j2' %}
+]
+
+
+================================================
+File: /bots/triage-slackbot/triage_slackbot/templates/messages/feed.j2
+================================================
+[
+	{
+		"type": "section",
+		"text": {
+			"type": "mrkdwn",
+			"text": "Received an <{{ inbound_message_url }}|inbound message> in <#{{ inbound_message_channel }}>:"
+		}
+	},
+	{
+		"type": "context",
+		"elements": [
+			{
+				"type": "plain_text",
+				"text": "Predicted category: {{ predicted_category }}",
+				"emoji": true
+			},
+			{
+				"type": "mrkdwn",
+				"text": "Triaged to: {{ oncall_mention }}"
+			},
+			{
+				"type": "plain_text",
+				"text": "Triage updates in the :thread:",
+				"emoji": true
+			}
+		]
+	}
+]
+
+
+================================================
+File: /bots/triage-slackbot/triage_slackbot/templates/blocks/select_conversation.j2
+================================================
+{
+    "type": "section",
+    "text": {"type": "mrkdwn", "text": "*Select a channel*"},
+    "accessory": {
+        "type": "conversations_select",
+        "placeholder": {
+            "type": "plain_text",
+            "text": "Select conversations",
+            "emoji": true
+        },
+        "action_id": "recategorize_select_conversation_action"
+    },
+    "block_id": "recategorize_select_conversation_block"
+}
+
+================================================
+File: /bots/triage-slackbot/triage_slackbot/templates/blocks/empty_category_warning.j2
+================================================
+{
+    "type": "context",
+    "block_id": "empty_category_warning_block",
+    "elements": [{"type": "plain_text", "text": "Category is required."}]
+}
+
+================================================
+File: /bots/triage-slackbot/triage_slackbot/templates/blocks/empty_conversation_warning.j2
+================================================
+{
+    "type": "context",
+    "block_id": "empty_conversation_warning_block",
+    "elements": [{"type": "plain_text", "text": "Conversation is required."}]
+}
+
+
+================================================
+File: /bots/triage-slackbot/Makefile
+================================================
+CWD := $(shell pwd)
+REPO_ROOT := $(shell git rev-parse --show-toplevel)
+ESCAPED_REPO_ROOT := $(shell echo $(REPO_ROOT) | sed 's/\//\\\//g')
+
+init-env-file:
+	cp ./triage_slackbot/.env.template ./triage_slackbot/.env
+
+init-pyproject:
+	cat $(CWD)/pyproject.template.toml | \
+	sed "s/\$$REPO_ROOT/$(ESCAPED_REPO_ROOT)/g" > $(CWD)/pyproject.toml 
+
+
+================================================
+File: /bots/triage-slackbot/README.md
+================================================
+<p align="center">
+  <img width="150" alt="triage-slackbot-logo" src="https://github.com/openai/openai-security-bots/assets/10287796/fab77b12-1640-452c-86df-30b8bdd6cd35">
+  <h1 align="center">Triage Slackbot</h1>
+</p>
+
+Triage Slackbot triages inbound requests in a Slack channel to different sub-teams within your organization.
+
+## Prerequisites
+
+You will need:
+1. A Slack application (aka your triage bot) with Socket Mode enabled
+2. OpenAI API key
+
+Generate an App-level token for your Slack app, by going to:
+```
+Your Slack App > Basic Information > App-Level Tokens > Generate Token and Scopes
+```
+Create a new token with `connections:write` scope. This is your `SOCKET_APP_TOKEN` token.
+
+Once you have them, from the current directory, run:
+```
+$ make init-env-file
+```
+and fill in the right values.
+
+Your Slack App needs the following scopes:
+
+- channels:history
+- chat:write
+- groups:history
+- reactions:read
+- reactions:write
+
+## Setup
+
+From the current directory, run:
+```
+make init-pyproject
+```
+
+From the repo root, run:
+```
+make clean-venv
+source venv/bin/activate
+make build-bot BOT=triage-slackbot
+```
+
+## Run bot with example configuration
+
+The example configuration is `config.toml`. Replace the configuration values as needed.
+
+⚠️ *Make sure that the bot is added to the channels it needs to read from and post to.* ⚠️
+
+From the repo root, run:
+
+```
+make run-bot BOT=triage-slackbot
+```
+
+## Demo
+
+This demo is run with the provided `config.toml`. In this demo:
+
+```
+inbound_request_channel_id = ID of #inbound-security-requests channel
+feed_channel_id = ID of #inbound-security-requests-feed channel
+
+[[ categories ]]
+key = "appsec"
+...
+oncall_slack_id = ID of #appsec-requests channel
+
+[[ categories ]]
+key = "privacy"
+...
+oncall_slack_id = ID of @tiffany user
+```
+
+The following triage scenarios are supported: 
+
+First, the bot categorizes the inbound requests accurately, and on-call acknowledges this prediction.
+
+https://github.com/openai/openai-security-bots/assets/10287796/2bb8b301-41b6-450f-a578-482e89a75050
+
+Secondly, the bot categorizes the request into a category that it can autorespond to, e.g. Physical Security, 
+and there is no manual action from on-call required.
+
+https://github.com/openai/openai-security-bots/assets/10287796/e77bacf0-e16d-4ed3-9567-6f3caaab02ad
+
+Finally, on-call can re-route an inbound request to another category's on-call if the initial predicted 
+category is not accurate. Additionally, if `other_category_enabled` is set to true, on-call can select any
+channels it can route the user to:
+
+https://github.com/openai/openai-security-bots/assets/10287796/04247a29-f904-42bc-82d8-12b7f2b7e170
+
+The bot will reply to the thread with this:
+
+<img width="671" alt="autorespond" src="https://github.com/openai/openai-security-bots/assets/10287796/ba01186f-41c4-4cd6-9982-2edb9429b2c4">
+
+
+================================================
+File: /Makefile
+================================================
+SHELL := /bin/bash
+
+clean-venv: rm-venv
+	python3 -m venv venv 
+
+
+rm-venv:
+	if [ -d "venv" ]; then rm -rf venv; fi
+
+maybe-clear-shared:
+ifeq ($(SKIP_CLEAR_SHARED), true)
+else
+	pip cache remove openai_slackbot
+endif
+
+build-shared:
+	pip install -e ./shared/openai-slackbot
+
+
+build-bot: maybe-clear-shared build-shared
+	cd bots/$(BOT) && $(MAKE) init-pyproject && pip install -e .
+
+
+run-bot:
+	python bots/$(BOT)/$(subst -,_,$(BOT))/bot.py
+
+
+clear:
+	find . | grep -E "(/__pycache__$|\.pyc$|\.pyo$)" | xargs rm -rf
+
+
+build-all: 
+	$(MAKE) build-bot BOT=triage-slackbot SKIP_CLEAR_SHARED=true
+
+
+test-all: 
+	pytest shared/openai-slackbot && \
+	pytest bots/triage-slackbot && \
+	pytest bots/incident-response-slackbot
+
+================================================
+File: /shared/openai-slackbot/tests/test_bot.py
+================================================
+import pytest
+
+
+async def test_start_bot(
+    mock_slack_app, mock_socket_mode_handler, mock_message_handler, mock_action_handler
+):
+    from openai_slackbot.bot import start_bot
+
+    await start_bot(
+        openai_organization_id="org-id",
+        slack_message_handler=mock_message_handler.__class__,
+        slack_action_handlers=[mock_action_handler.__class__],
+        slack_template_path="/path/to/templates",
+    )
+
+    mock_slack_app.event.assert_called_once_with("message")
+    mock_slack_app.action.assert_called_once_with("mock_action")
+    mock_socket_mode_handler.start_async.assert_called_once()
+
+
+================================================
+File: /shared/openai-slackbot/tests/conftest.py
+================================================
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from openai_slackbot.clients.slack import SlackClient
+from openai_slackbot.handlers import BaseActionHandler, BaseMessageHandler
+
+
+@pytest.fixture
+def mock_slack_app():
+    with patch("slack_bolt.app.async_app.AsyncApp") as mock_app:
+        yield mock_app.return_value
+
+
+@pytest.fixture
+def mock_socket_mode_handler():
+    with patch(
+        "slack_bolt.adapter.socket_mode.async_handler.AsyncSocketModeHandler"
+    ) as mock_handler:
+        mock_handler_object = mock_handler.return_value
+        mock_handler_object.start_async = AsyncMock()
+        yield mock_handler_object
+
+
+@pytest.fixture
+def mock_openai():
+    mock_openai = MagicMock()
+    with patch.dict("sys.modules", openai=mock_openai):
+        yield mock_openai
+
+
+@pytest.fixture
+def mock_slack_asyncwebclient():
+    with patch("slack_sdk.web.async_client.AsyncWebClient") as mock_client:
+        yield mock_client.return_value
+
+
+@pytest.fixture
+def mock_slack_client(mock_slack_asyncwebclient):
+    return SlackClient(mock_slack_asyncwebclient, "template_path")
+
+
+@pytest.fixture
+def mock_message_handler(mock_slack_client):
+    return MockMessageHandler(mock_slack_client)
+
+
+@pytest.fixture
+def mock_action_handler(mock_slack_client):
+    return MockActionHandler(mock_slack_client)
+
+
+class MockMessageHandler(BaseMessageHandler):
+    def __init__(self, slack_client):
+        super().__init__(slack_client)
+        self.mock_handler = AsyncMock()
+
+    async def should_handle(self, args):
+        return args.event["subtype"] != "bot_message"
+
+    async def handle(self, args):
+        await self.mock_handler(args)
+
+
+class MockActionHandler(BaseActionHandler):
+    def __init__(self, slack_client):
+        super().__init__(slack_client)
+        self.mock_handler = AsyncMock()
+
+    async def handle(self, args):
+        await self.mock_handler(args)
+
+    @property
+    def action_id(self):
+        return "mock_action"
+
+
+================================================
+File: /shared/openai-slackbot/tests/test_handlers.py
+================================================
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+
+@pytest.mark.parametrize("subtype, should_handle", [("message", True), ("bot_message", False)])
+async def test_message_handler(mock_message_handler, subtype, should_handle):
+    args = MagicMock(
+        ack=AsyncMock(),
+        event={"type": "message", "subtype": subtype, "channel": "channel", "ts": "ts"},
+    )
+
+    await mock_message_handler.maybe_handle(args)
+    args.ack.assert_awaited_once()
+    if should_handle:
+        mock_message_handler.mock_handler.assert_awaited_once_with(args)
+    else:
+        mock_message_handler.mock_handler.assert_not_awaited()
+
+    assert mock_message_handler.logging_extra(args) == {
+        "type": "message",
+        "subtype": subtype,
+        "channel": "channel",
+        "ts": "ts",
+    }
+
+
+async def test_action_handler(mock_action_handler):
+    args = MagicMock(
+        ack=AsyncMock(),
+        body={
+            "type": "type",
+            "actions": ["action"],
+        },
+    )
+
+    await mock_action_handler.maybe_handle(args)
+    args.ack.assert_awaited_once()
+    mock_action_handler.mock_handler.assert_awaited_once_with(args)
+
+    assert mock_action_handler.logging_extra(args) == {
+        "action_type": "type",
+        "action": "action",
+    }
+
+
+================================================
+File: /shared/openai-slackbot/tests/clients/test_slack.py
+================================================
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from openai_slackbot.clients.slack import CreateSlackMessageResponse
+from slack_sdk.errors import SlackApiError
+
+
+async def test_get_message_link_success(mock_slack_client):
+    mock_slack_client._client.chat_getPermalink = AsyncMock(
+        return_value={
+            "ok": True,
+            "channel": "C123456",
+            "permalink": "https://myorg.slack.com/archives/C123456/p1234567890",
+        }
+    )
+    link = await mock_slack_client.get_message_link(channel="channel", message_ts="message_ts")
+    mock_slack_client._client.chat_getPermalink.assert_called_once_with(
+        channel="channel", message_ts="message_ts"
+    )
+    assert link == "https://myorg.slack.com/archives/C123456/p1234567890"
+
+
+async def test_get_message_link_failed(mock_slack_client):
+    mock_slack_client._client.chat_getPermalink = AsyncMock(
+        return_value={"ok": False, "error": "failed"}
+    )
+    with pytest.raises(Exception):
+        await mock_slack_client.get_message_link(channel="channel", message_ts="message_ts")
+        mock_slack_client._client.chat_getPermalink.assert_called_once_with(
+            channel="channel", message_ts="message_ts"
+        )
+
+
+async def test_post_message_success(mock_slack_client):
+    mock_message_data = {
+        "ok": True,
+        "channel": "C234567",
+        "ts": "ts",
+        "message": {
+            "bot_id": "bot_id",
+            "bot_profile": {"id": "bot_profile_id"},
+            "team": "team",
+            "text": "text",
+            "ts": "ts",
+            "type": "type",
+            "user": "user",
+        },
+    }
+    mock_response = MagicMock(data=mock_message_data)
+    mock_response.__getitem__.side_effect = mock_message_data.__getitem__
+    mock_slack_client._client.chat_postMessage = AsyncMock(return_value=mock_response)
+
+    response = await mock_slack_client.post_message(channel="C234567", text="text")
+    assert response == CreateSlackMessageResponse(**mock_message_data)
+
+
+async def test_post_message_failed(mock_slack_client):
+    mock_slack_client._client.chat_postMessage = AsyncMock(
+        return_value={"ok": False, "error": "failed"}
+    )
+    with pytest.raises(Exception):
+        await mock_slack_client.post_message(channel="channel", text="text")
+        mock_slack_client._client.chat_postMessage.assert_called_once_with(
+            channel="channel", text="text"
+        )
+
+
+async def test_update_message_success(mock_slack_client):
+    mock_message_data = {
+        "ok": True,
+        "channel": "C234567",
+        "ts": "ts",
+        "message": {
+            "bot_id": "bot_id",
+            "bot_profile": {"id": "bot_profile_id"},
+            "team": "team",
+            "text": "text",
+            "ts": "ts",
+            "type": "type",
+            "user": "user",
+        },
+    }
+    mock_response = MagicMock(data=mock_message_data)
+    mock_response.__getitem__.side_effect = mock_message_data.__getitem__
+    mock_slack_client._client.chat_update = AsyncMock(return_value=mock_response)
+
+    response = await mock_slack_client.update_message(channel="C234567", ts="ts", text="text")
+    assert response == mock_message_data
+
+
+async def test_update_message_failed(mock_slack_client):
+    mock_slack_client._client.chat_update = AsyncMock(return_value={"ok": False, "error": "failed"})
+    with pytest.raises(Exception):
+        await mock_slack_client.update_message(channel="channel", ts="ts", text="text")
+        mock_slack_client._client.chat_update.assert_called_once_with(
+            channel="channel", ts="ts", text="text"
+        )
+
+
+async def test_add_reaction_success(mock_slack_client):
+    mock_response_data = {"ok": True}
+    mock_response = MagicMock(data=mock_response_data)
+    mock_response.__getitem__.side_effect = mock_response_data.__getitem__
+    mock_slack_client._client.reactions_add = AsyncMock(return_value=mock_response)
+    await mock_slack_client.add_reaction(channel="channel", name="thumbsup", timestamp="timestamp")
+
+
+async def test_add_reaction_already_reacted(mock_slack_client):
+    mock_slack_client._client.reactions_add = AsyncMock(
+        side_effect=SlackApiError("already_reacted", {"error": "already_reacted"})
+    )
+    response = await mock_slack_client.add_reaction(
+        channel="channel", name="thumbsup", timestamp="timestamp"
+    )
+    assert response == {}
+
+
+async def test_add_reaction_failed(mock_slack_client):
+    mock_slack_client._client.reactions_add = AsyncMock(
+        side_effect=SlackApiError("failed", {"error": "invalid_reaction"})
+    )
+    with pytest.raises(Exception):
+        await mock_slack_client.add_reaction(
+            channel="channel", name="thumbsup", timestamp="timestamp"
+        )
+
+
+================================================
+File: /shared/openai-slackbot/pyproject.toml
+================================================
+[project]
+name = "openai-slackbot"
+requires-python = ">=3.8"
+version = "1.0.0"
+dependencies = [
+    "aiohttp",
+    "Jinja2",
+    "openai",
+    "pydantic",
+    "python-dotenv",
+    "slack-bolt",
+    "slack-sdk",
+    "pytest",
+    "pytest-env",
+    "pytest-asyncio",
+    "aiohttp",
+]
+
+[build-system]
+requires = ["setuptools>=64.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+env = [
+  "SLACK_BOT_TOKEN=mock-token",
+  "SOCKET_APP_TOKEN=mock-token",
+  "OPENAI_API_KEY=mock-key",
+]
+
+
+================================================
+File: /shared/openai-slackbot/openai_slackbot/handlers.py
+================================================
+import abc
+import typing as t
+from logging import getLogger
+
+from openai_slackbot.clients.slack import SlackClient
+
+logger = getLogger(__name__)
+
+
+class BaseHandler(abc.ABC):
+    def __init__(self, slack_client: SlackClient) -> None:
+        self._slack_client = slack_client
+
+    async def maybe_handle(self, args):
+        await args.ack()
+
+        logging_extra = self.logging_extra(args)
+        try:
+            should_handle = await self.should_handle(args)
+            logger.info(
+                f"Handler: {self.__class__.__name__}, should handle: {should_handle}",
+                extra=logging_extra,
+            )
+            if should_handle:
+                await self.handle(args)
+        except Exception:
+            logger.exception("Failed to handle event", extra=logging_extra)
+
+    @abc.abstractmethod
+    async def should_handle(self, args) -> bool:
+        ...
+
+    @abc.abstractmethod
+    async def handle(self, args):
+        ...
+
+    @abc.abstractmethod
+    def logging_extra(self, args) -> t.Dict[str, t.Any]:
+        ...
+
+
+class BaseMessageHandler(BaseHandler):
+    def logging_extra(self, args) -> t.Dict[str, t.Any]:
+        fields = {}
+        for field in ["type", "subtype", "channel", "ts"]:
+            fields[field] = args.event.get(field)
+        return fields
+
+
+class BaseActionHandler(BaseHandler):
+    @abc.abstractproperty
+    def action_id(self) -> str:
+        ...
+
+    async def should_handle(self, args) -> bool:
+        return True
+
+    def logging_extra(self, args) -> t.Dict[str, t.Any]:
+        return {
+            "action_type": args.body.get("type"),
+            "action": args.body.get("actions", [])[0],
+        }
+
+
+================================================
+File: /shared/openai-slackbot/openai_slackbot/bot.py
+================================================
+import typing as t
+from logging import getLogger
+
+import openai
+from openai_slackbot.clients.slack import SlackClient
+from openai_slackbot.handlers import BaseActionHandler, BaseMessageHandler
+from openai_slackbot.utils.envvars import string
+from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
+from slack_bolt.app.async_app import AsyncApp
+
+logger = getLogger(__name__)
+
+
+async def register_app_handlers(
+    *,
+    app: AsyncApp,
+    message_handler: t.Type[BaseMessageHandler],
+    action_handlers: t.List[t.Type[BaseActionHandler]],
+    slack_client: SlackClient,
+):
+    if message_handler:
+        app.event("message")(message_handler(slack_client).maybe_handle)
+
+    if action_handlers:
+        for action_handler in action_handlers:
+            handler = action_handler(slack_client)
+            app.action(handler.action_id)(handler.maybe_handle)
+
+
+async def init_bot(
+    *,
+    openai_organization_id: str,
+    slack_message_handler: t.Type[BaseMessageHandler],
+    slack_action_handlers: t.List[t.Type[BaseActionHandler]],
+    slack_template_path: str,
+):
+    slack_bot_token = string("SLACK_BOT_TOKEN")
+    openai_api_key = string("OPENAI_API_KEY")
+
+    # Init OpenAI API
+    openai.organization = openai_organization_id
+    openai.api_key = openai_api_key
+
+    # Init slack bot
+    app = AsyncApp(token=slack_bot_token)
+    slack_client = SlackClient(app.client, slack_template_path)
+    await register_app_handlers(
+        app=app,
+        message_handler=slack_message_handler,
+        action_handlers=slack_action_handlers,
+        slack_client=slack_client,
+    )
+
+    return app
+
+
+async def start_app(app):
+    socket_app_token = string("SOCKET_APP_TOKEN")
+    handler = AsyncSocketModeHandler(app, socket_app_token)
+    await handler.start_async()
+
+
+async def start_bot(
+    *,
+    openai_organization_id: str,
+    slack_message_handler: t.Type[BaseMessageHandler],
+    slack_action_handlers: t.List[t.Type[BaseActionHandler]],
+    slack_template_path: str,
+):
+    app = await init_bot(
+        openai_organization_id=openai_organization_id,
+        slack_message_handler=slack_message_handler,
+        slack_action_handlers=slack_action_handlers,
+        slack_template_path=slack_template_path,
+    )
+
+    await start_app(app)
+
+
+================================================
+File: /shared/openai-slackbot/openai_slackbot/clients/slack.py
+================================================
+import json
+import os
+import typing as t
+from logging import getLogger
+
+from jinja2 import Environment, FileSystemLoader
+from pydantic import BaseModel
+from slack_sdk.errors import SlackApiError
+from slack_sdk.web.async_client import AsyncWebClient
+
+logger = getLogger(__name__)
+
+
+class SlackMessage(BaseModel):
+    app_id: t.Optional[str] = None
+    blocks: t.Optional[t.List[t.Any]] = None
+    bot_id: t.Optional[str] = None
+    bot_profile: t.Optional[t.Dict[str, t.Any]] = None
+    team: str
+    text: str
+    ts: str
+    type: str
+    user: t.Optional[str] = None
+
+
+class CreateSlackMessageResponse(BaseModel):
+    ok: bool
+    channel: str
+    ts: str
+    message: SlackMessage
+
+
+class SlackClient:
+    """
+    SlackClient wraps the Slack AsyncWebClient implementation and
+    provides some additional functionality specific to the Slackbot
+    implementation.
+    """
+
+    def __init__(self, client: AsyncWebClient, template_path: str) -> None:
+        self._client = client
+        self._jinja = self._init_jinja(template_path)
+
+    async def get_message_link(self, **kwargs) -> str:
+        response = await self._client.chat_getPermalink(**kwargs)
+        if not response["ok"]:
+            raise Exception(f"Failed to get Slack message link: {response['error']}")
+        return response["permalink"]
+
+    async def get_message(self, channel: str, ts: str) -> t.Optional[t.Dict[str, t.Any]]:
+        """Follows: https://api.slack.com/messaging/retrieving."""
+        result = await self._client.conversations_history(
+            channel=channel,
+            inclusive=True,
+            latest=ts,
+            limit=1,
+        )
+        return result["messages"][0] if result["messages"] else None
+
+    async def post_message(self, **kwargs) -> CreateSlackMessageResponse:
+        response = await self._client.chat_postMessage(**kwargs)
+        if not response["ok"]:
+            raise Exception(f"Failed to post Slack message: {response['error']}")
+
+        assert isinstance(response.data, dict)
+        return CreateSlackMessageResponse(**response.data)
+
+    async def update_message(self, **kwargs) -> t.Dict[str, t.Any]:
+        response = await self._client.chat_update(**kwargs)
+        if not response["ok"]:
+            raise Exception(f"Failed to update Slack message: {response['error']}")
+
+        assert isinstance(response.data, dict)
+        return response.data
+
+    async def add_reaction(self, **kwargs) -> t.Dict[str, t.Any]:
+        try:
+            response = await self._client.reactions_add(**kwargs)
+        except SlackApiError as e:
+            if e.response["error"] == "already_reacted":
+                return {}
+            raise e
+
+        assert isinstance(response.data, dict)
+        return response.data
+
+    async def get_thread_messages(self, channel: str, thread_ts: str) -> t.List[t.Dict[str, t.Any]]:
+        response = await self._client.conversations_replies(channel=channel, ts=thread_ts)
+        if not response["ok"]:
+            raise Exception(f"Failed to get thread messages: {response['error']}")
+
+        assert isinstance(response.data, dict)
+        return response.data["messages"]
+
+    async def get_user_display_name(self, user_id: str) -> str:
+        response = await self._client.users_info(user=user_id)
+        if not response["ok"]:
+            raise Exception(f"Failed to get user info: {response['error']}")
+        return response["user"]["profile"]["display_name"]
+
+    async def get_original_blocks(self, thread_ts: str, channel: str) -> None:
+        """Given a thread_ts, get original message block"""
+        response = await self._client.conversations_replies(
+            channel=channel,
+            ts=thread_ts,
+        )
+        try:
+            messages = response.get("messages", [])
+            if not messages:
+                raise ValueError(f"Error fetching original message for thread_ts {thread_ts}")
+            blocks = messages[0].get("blocks")
+            if not blocks:
+                raise ValueError(f"Error fetching original message for thread_ts {thread_ts}")
+            return blocks
+        except Exception as e:
+            logger.exception(f"Error fetching original message for thread_ts {thread_ts}: {e}")
+
+    def render_blocks_from_template(self, template_filename: str, context: t.Dict = {}) -> t.Any:
+        rendered_template = self._jinja.get_template(template_filename).render(context)
+        return json.loads(rendered_template)
+
+    def _init_jinja(self, template_path: str):
+        templates_dir = os.path.join(template_path)
+        return Environment(loader=FileSystemLoader(templates_dir))
+
+
+================================================
+File: /shared/openai-slackbot/openai_slackbot/utils/envvars.py
+================================================
+import os
+import typing as t
+
+
+def string(key: str, default: t.Optional[str] = None) -> str:
+    val = os.environ.get(key)
+    if not val:
+        if default is None:
+            raise ValueError(f"Missing required environment variable: {key}")
+        return default
+    return val
+
+
+================================================
+File: /shared/openai-slackbot/openai_slackbot/utils/slack.py
+================================================
+import typing as t
+
+RenderedSlackBlock = t.NewType("RenderedSlackBlock", t.Dict[str, t.Any])
+
+
+def block_id_exists(blocks: t.List[RenderedSlackBlock], block_id: str) -> bool:
+    return any([block.get("block_id") == block_id for block in blocks])
+
+
+def remove_block_id_if_exists(blocks: t.List[RenderedSlackBlock], block_id: str) -> t.List:
+    return [block for block in blocks if block.get("block_id") != block_id]
+
+
+def get_block_by_id(blocks: t.Dict, block_id: str) -> t.Dict:
+    for block in blocks:
+        if block.get("block_id") == block_id:
+            return block
+    return {}
+
+
+def extract_text_from_event(event) -> str:
+    """Extracts text from either plaintext and block message."""
+
+    # Extract text from plaintext message.
+    text = event.get("text")
+    if text:
+        return text
+
+    # Extract text from message blocks.
+    texts = []
+    attachments = event.get("attachments", [])
+    for attachment in attachments:
+        attachment_message_blocks = attachment.get("message_blocks", [])
+        for amb in attachment_message_blocks:
+            message_blocks = amb.get("message", {}).get("blocks", [])
+            for mb in message_blocks:
+                mb_elements = mb.get("elements", [])
+                for mbe in mb_elements:
+                    mbe_elements = mbe.get("elements", [])
+                    for mbee in mbe_elements:
+                        if mbee.get("type") == "text":
+                            texts.append(mbee["text"])
+
+    return " ".join(texts).strip()
+
+
+def render_slack_id_to_mention(id: str):
+    """Render a usergroup or user ID to a mention."""
+
+    if not id:
+        return ""
+    elif id.startswith("U"):
+        return f"<@{id}>"
+    elif id.startswith("S"):
+        return f"<!subteam|{id}>"
+    elif id.startswith("C"):
+        return f"<#{id}>"
+    else:
+        raise ValueError(f"Unsupported/invalid ID type: {id}")
+
+
+def render_slack_url(*, url: str, text: str) -> str:
+    """Render a URL to a clickable link."""
+    return f"<{url}|{text}>"
+
+
+================================================
+File: /SECURITY.md
+================================================
+# Security Policy
+For a more in-depth look at our security policy, please check out our [Coordinated Vulnerability Disclosure Policy](https://openai.com/security/disclosure/#:~:text=Disclosure%20Policy,-Security%20is%20essential&text=OpenAI%27s%20coordinated%20vulnerability%20disclosure%20policy,expect%20from%20us%20in%20return.).
+
+Our PGP key can located [at this address.](https://cdn.openai.com/security.txt)
+
+
+================================================
+File: /CODEOWNERS
+================================================
+*       @openai/security-team
+
+
+================================================
+File: /LICENSE
+================================================
+MIT License
+
+Copyright (c) 2024 OpenAI
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================
+File: /README.md
+================================================
+# OpenAI Security Bots 🤖
+
+Slack bots integrated with OpenAI APIs to streamline security team's workflows.
+
+All the bots can be found under `bots/` directory.
+
+```
+shared/
+  openai-slackbot/
+bots/
+  triage-slackbot/
+  incident-response-slackbot/
+  sdlc-slackbot/
+```
+
+Refer to each bot's README for more information and setup instruction.
+
+
+If you wish to contribute, note this repo uses pre-commit to help. In this directory, run:
+```
+pip install pre-commit
+pre-commit install
+```
+
+
