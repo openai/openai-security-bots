@@ -9,13 +9,13 @@ repos:
       stages: ["commit", "push"]
 
 - repo: https://github.com/hauntsaninja/black-pre-commit-mirror
-  rev: 23.10.1
+  rev: 1836df4ee440d6637f6a4f3d4e0727f1d75ba0eb  # 23.10.1
   hooks:
     - id: black
       args: [--line-length=100, --workers=6]
 
 - repo: https://github.com/pycqa/isort
-  rev: 5.12.0
+  rev: e44834b7b294701f596c9118d6c370f86671a50d  # 5.12.0
   hooks:
     - id: isort
       name: isort (python)
